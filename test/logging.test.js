@@ -1,4 +1,5 @@
 // Logging and error-handling behaviour: secrets never reach the log, 5xx never leak internals, outbound calls fail with a clear message.
+process.env.LOG_TO_FILE = "false"; // the unit tests must not create log files in the project
 const test = require("node:test");
 const assert = require("node:assert/strict");
 

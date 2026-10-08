@@ -110,6 +110,14 @@ public/, views/              browser UI (boot.js signs in, billing.js = Plans & 
 test/                        unit tests and an end-to-end suite against PostgreSQL + a fake Magento
 ```
 
+## Logs
+
+Written to the console and to `logs/app.log` (everything) and `logs/error.log` (warnings and errors). **Rotation:** every day at
+**00:05:00** (server local time) and **at once whenever a file passes 10 MB**, the file is zipped (`app-2026-10-08.zip`, or
+`app-2026-10-08-153012.zip` for a size rotation) and a new file is started. The rename is atomic, so no line is lost or split; if the
+process was down at 00:05 the old file is rotated at the next start. Settings: `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_ROTATE_AT`,
+`LOG_RETENTION_DAYS` (0 = keep all archives), `LOG_LEVEL`, `LOG_FORMAT`. Secrets are redacted.
+
 ## Deploying
 
 Needs a public HTTPS address (`PUBLIC_BASE_URL`), managed PostgreSQL (create the `adapter_app` role as in
