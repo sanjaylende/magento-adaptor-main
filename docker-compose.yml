@@ -1,0 +1,17 @@
+# Local PostgreSQL for the adapter (the production database is a managed Postgres; same schema).
+# Port 5434 avoids the Windows-installed Postgres servers on 5432/5433.
+name: magento-adaptor
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: adapter_owner
+      POSTGRES_PASSWORD: adapter_owner_local
+      POSTGRES_DB: magento_adapter
+    ports: ["127.0.0.1:5434:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+volumes:
+  pgdata: {}

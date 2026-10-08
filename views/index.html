@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Magento → Flipick product picker</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div id="appRoot">
+    <div class="top-bar">
+      <div>
+        <h1>Select products</h1>
+        <p class="subtitle" id="storeSubtitle"></p>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="usage-badge" id="usageBadge"></div>
+        <button class="btn-primary" id="planCta" onclick="openPlanModal('manual')">View Plans</button>
+        <button class="stroked" id="refresh" onclick="refresh()">Refresh from Magento</button>
+      </div>
+    </div>
+
+    <div class="selection-layout">
+      <div class="main-column">
+        <div class="toolbar">
+          <input type="text" class="toolbar-search" id="searchInput" placeholder="Search products" />
+          <select class="toolbar-select" id="sortSelect">
+            <option value="recent">Most recent generation</option>
+            <option value="name">Name (A-Z)</option>
+            <option value="category">Category</option>
+            <option value="updated">Recently updated</option>
+            <option value="price-desc">Price: high to low</option>
+            <option value="price-asc">Price: low to high</option>
+          </select>
+          <select class="toolbar-select" id="categorySelect"></select>
+          <select class="toolbar-select" id="statusSelect">
+            <option value="All">Status: All</option>
+            <option value="rendering">Rendering</option>
+            <option value="ready">Ready</option>
+            <option value="published">Published</option>
+            <option value="failed">Failed</option>
+            <option value="none">No videos</option>
+          </select>
+          <span class="product-count" id="count"></span>
+        </div>
+        <div class="filter-chips" id="filterChips"></div>
+        <div class="refresh-error" id="refreshError" style="display:none"></div>
+        <table>
+          <thead><tr><th></th><th>Name</th><th>Category</th><th>Price</th><th>Video status</th><th>Updated</th><th>Actions</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="pagination" id="pagination"></div>
+      </div>
+
+      <div class="detail-panel">
+        <h2>Generated videos <span class="panel-count" id="genCount">0</span></h2>
+        <div class="panel-empty" id="panelEmpty">Generated videos will appear here.</div>
+        <div id="panelCards"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="videoPreviewRoot"></div>
+  <div id="versionsPanelRoot"></div>
+  <div id="planModalRoot"></div>
+  <div id="imagePreviewRoot"></div>
+
+  <script src="/static/js/boot.js"></script>
+</body>
+</html>

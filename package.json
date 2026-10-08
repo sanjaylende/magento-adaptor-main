@@ -1,0 +1,19 @@
+{
+  "name": "magento-flipick-adapter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.9.0"
+  },
+  "scripts": {
+    "start": "node --use-system-ca server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "db:up": "docker compose up -d db"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "pg": "^8.23.1"
+  }
+}

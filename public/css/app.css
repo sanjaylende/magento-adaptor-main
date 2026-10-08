@@ -1,0 +1,301 @@
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0; padding: 24px 32px 48px; background: #f7f6f2; color: #23221f;
+}
+h1 { margin: 0; font-size: 22px; }
+.subtitle { margin: 2px 0 0; color: #888780; font-size: 13px; }
+.top-bar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+button.stroked {
+  border: 1px solid #d3d1c7; background: #fff; color: #23221f;
+  border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+}
+button.stroked:hover { background: #f1efe8; }
+button.stroked:disabled { opacity: 0.5; cursor: default; }
+
+.selection-layout { display: flex; gap: 28px; align-items: flex-start; }
+.main-column { flex: 1 1 auto; min-width: 0; }
+
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar-search {
+  border: 1px solid #d3d1c7; border-radius: 8px; padding: 7px 12px; font-size: 13px;
+  font-family: inherit; min-width: 200px;
+}
+.toolbar-select {
+  border: 1px solid #d3d1c7; background: #fff; color: #23221f; border-radius: 20px;
+  padding: 6px 12px; font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.product-count { font-size: 13px; color: #888780; margin-left: auto; }
+
+table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.04); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 0.5px solid #e5e4de; vertical-align: middle; font-size: 13.5px; }
+th { color: #5f5e5a; font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.02em; background: #fafaf7; }
+tr:last-child td { border-bottom: none; }
+.thumb { width: 48px; height: 48px; object-fit: contain; background: #fff; border: 1px solid #e8e6e0; border-radius: 4px; }
+.thumb-placeholder { width: 48px; height: 48px; background: #f4f3ef; border-radius: 4px; }
+s { color: #a8a69e; margin-left: 4px; }
+.offer-pct { color: #1a7a3d; font-size: 12px; margin-left: 4px; }
+
+.action-btn {
+  border: 1px solid #534ab7; background: #fff; color: #534ab7; font-size: 12px;
+  padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  /* Shared with the Download <a> links (server.js's push-shopify/restore
+     siblings are all real <button>s, which never need this) -- an <a>
+     needs an explicit reset or it renders as an underlined, block-level
+     link instead of matching the bordered button look. */
+  text-decoration: none; display: inline-block;
+}
+.action-btn:hover { background: #f1efe8; }
+.action-btn:disabled { opacity: 0.5; cursor: default; }
+.row-status { font-size: 11px; color: #888780; margin-top: 4px; margin-left: 10px; }
+.row-error { color: #b00020; font-size: 12px; margin-top: 4px; max-width: 220px; }
+
+.detail-panel { flex: 0 1 340px; min-width: 260px; position: sticky; top: 24px; }
+.detail-panel h2 {
+  margin: 0 0 14px; font-size: 15px; font-weight: 600; display: flex; align-items: center;
+  justify-content: space-between; padding-bottom: 10px; border-bottom: 0.5px solid #e5e4de;
+}
+.panel-count { font-size: 12px; font-weight: 600; color: #534ab7; background: #eeedfe; border-radius: 10px; padding: 2px 9px; }
+.panel-empty { background: #fff; border: 1px dashed #d3d1c7; border-radius: 12px; padding: 24px; text-align: center; color: #888780; font-size: 13px; }
+
+.panel-card { background: #fff; border: 0.5px solid #e5e4de; border-radius: 12px; overflow: hidden; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); transition: box-shadow 0.15s; }
+.panel-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.07); }
+.panel-card-header { padding: 9px 12px; font-size: 13px; font-weight: 600; background: #fafaf7; border-bottom: 0.5px solid #e5e4de; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; justify-content: space-between; gap: 8px; }
+.video-type-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; }
+.video-type-badge.hero_product { color: #8a5a00; background: #fdf0d5; }
+.video-type-badge.lifestyle { color: #534ab7; background: #eeedfe; }
+.video-type-badge.image_transition { color: #1d7a5f; background: #e3f2ed; }
+
+/* Per-slot status, aggregated onto a product row -- same metrics as
+   .video-type-badge, colors reused from elsewhere in this file so a new
+   status doesn't introduce a new hue. */
+.status-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; margin-right: 4px; display: inline-block; }
+.status-badge.rendering { color: #8a5a00; background: #fdf0d5; }
+.status-badge.candidates { color: #534ab7; background: #eeedfe; }
+.status-badge.ready { color: #1a7a3d; background: #e6f4ea; }
+.status-badge.published { color: #1a7a3d; background: #e6f4ea; }
+.status-badge.failed { color: #b00020; background: #fbe9e9; }
+.status-badge.canceled { color: #888780; background: #f1efe8; }
+.status-badge.none { color: #888780; background: #f1efe8; }
+.status-badge.clickable { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.status-badge.clickable:hover { filter: brightness(0.95); }
+.spinner-inline { width: 10px; height: 10px; border-width: 1.5px; vertical-align: -1px; }
+
+.clickable-name, .clickable-thumb { cursor: pointer; }
+.clickable-name:hover { text-decoration: underline; color: #534ab7; }
+.clickable-thumb:hover { opacity: 0.85; }
+.thumb.enlargeable { cursor: zoom-in; }
+
+.row-changed { color: #8a5a00; font-size: 11.5px; margin-top: 4px; cursor: pointer; }
+.row-changed:hover { text-decoration: underline; }
+.changed-detail-row td { background: #fdf6ec; border-top: none; padding: 4px 12px 10px; }
+.changed-detail { font-size: 12.5px; color: #5f5e5a; display: flex; flex-direction: column; gap: 3px; }
+.changed-detail img { display: none; } /* image "from"/"to" values are URLs, not rendered inline */
+
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: -4px 0 12px; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 6px; background: #eeedfe; color: #534ab7;
+  font-size: 12px; padding: 4px 6px 4px 10px; border-radius: 14px;
+}
+.filter-chip button { border: none; background: none; color: inherit; cursor: pointer; font-size: 11px; padding: 2px; line-height: 1; }
+.filter-chip-clear-all { border: none; background: none; color: #888780; font-size: 12px; cursor: pointer; text-decoration: underline; }
+
+.refresh-error { color: #b00020; background: #fbe9e9; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+
+.pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; }
+
+.panel-card-media { position: relative; width: 100%; aspect-ratio: 16/9; background: #f4f3ef; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.panel-card-media img { width: 100%; height: 100%; object-fit: cover; }
+.panel-card-media.playable:hover .panel-card-play { transform: scale(1.1); opacity: 1; }
+.panel-card-play { position: absolute; font-size: 40px; color: #fff; opacity: 0.9; filter: drop-shadow(0 1px 4px rgba(0,0,0,0.5)); transition: transform 0.15s, opacity 0.15s; pointer-events: none; }
+.panel-card-play::before { content: "▶"; }
+.panel-card-error { color: #b00020; font-size: 13px; padding: 12px; text-align: center; }
+.panel-card-footer { padding: 8px 12px; font-size: 12px; color: #888780; border-top: 0.5px solid #e5e4de; display: flex; align-items: center; justify-content: space-between; }
+.panel-card-delete { border: none; background: none; color: #23221f; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; opacity: 0.6; display: inline-flex; align-items: center; }
+.panel-card-delete:hover { opacity: 1; background: #fbe9e9; }
+.panel-card-icon-btn {
+  border: none; background: none; color: #23221f; font-size: 14px; padding: 2px 6px;
+  border-radius: 4px; opacity: 0.6; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center;
+}
+.panel-card-icon-btn:hover { opacity: 1; background: #eeedfe; }
+.spinner { width: 20px; height: 20px; border: 2.5px solid #e5e4de; border-top-color: #534ab7; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Generate Video modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: #fff; border-radius: 12px; width: 480px; max-width: 92vw; max-height: 88vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+.modal-header { padding: 18px 22px 4px; font-size: 17px; font-weight: 600; }
+.modal-body { padding: 10px 22px 4px; }
+.modal-actions { padding: 14px 22px 18px; display: flex; justify-content: flex-end; gap: 8px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; font-weight: 600; color: #5f5e5a; margin-bottom: 4px; }
+.field select, .field textarea {
+  width: 100%; border: 1px solid #d3d1c7; border-radius: 8px; padding: 8px 10px; font-size: 13.5px; font-family: inherit;
+}
+.field textarea { resize: vertical; }
+/* Variable N's token-name input and the "Custom text…" value input had
+   no rule at all before this (only select/textarea were styled above),
+   so they rendered as bare unstyled browser inputs next to everything
+   else's consistent bordered look. Laid out as a wrapping flex row
+   instead of full-width stacked, since a name input + value select +
+   remove button share one line. */
+.field.variable-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.field.variable-row label { width: 100%; }
+.field.variable-row input[type="text"], .field.variable-row select {
+  border: 1px solid #d3d1c7; border-radius: 8px; padding: 8px 10px; font-size: 13.5px; font-family: inherit;
+}
+.field.variable-row input[type="text"] { flex: 1 1 130px; }
+.field.variable-row select { flex: 1 1 160px; }
+.field-hint { font-size: 11.5px; color: #888780; margin-top: 3px; }
+.btn-text { border: none; background: none; color: #534ab7; font-size: 13px; cursor: pointer; padding: 8px 10px; }
+.btn-primary { border: none; background: #534ab7; color: #fff; font-size: 13px; padding: 9px 16px; border-radius: 8px; cursor: pointer; }
+.btn-primary:disabled { opacity: 0.5; cursor: default; }
+.loading-block { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 30px 0; }
+
+/* Usage badge + Plans & Billing modal */
+.usage-badge {
+  font-size: 12px; color: #5f5e5a; background: #f1efe8; border-radius: 20px;
+  padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; border: none;
+}
+.usage-badge.warn { color: #8a5a00; background: #fdf0d5; }
+.usage-badge.blocked { color: #b00020; background: #fbe9e9; }
+.plan-modal { width: 720px; }
+.plan-gate-banner { background: #fdf0d5; color: #6b4400; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 0 22px 14px; }
+.plan-top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 16px; }
+.cycle-toggle { display: inline-flex; border: 1px solid #d3d1c7; border-radius: 20px; padding: 2px; margin: 0; }
+.cycle-toggle button {
+  border: none; background: none; font-size: 12.5px; padding: 0 14px; height: 26px; border-radius: 18px; cursor: pointer;
+  color: #5f5e5a; display: inline-flex; align-items: center;
+}
+.cycle-toggle button.active { background: #534ab7; color: #fff; }
+/* Outline (not border) so it never affects the button's own box size or
+   shifts it out of alignment with the Pro card's right edge below it.
+   height: 30px matches the cycle-toggle capsule's own outer height
+   (its 26px buttons + the toggle container's 2px padding top/bottom)
+   so the two line up instead of the taller default text button. */
+.cancel-plan-btn {
+  border: none; background: none; color: #b00020; font-size: 13px; padding: 0 14px; height: 30px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; outline: 1.5px solid #2f9e63; outline-offset: -1px; border-radius: 100px;
+}
+.cancel-plan-btn:disabled { opacity: 0.5; cursor: default; }
+/* min-height alone isn't enough to stop the Monthly <-> Annual toggle
+   from resizing the modal -- it's a floor, and either variant's wrapped
+   text can exceed a guessed floor and grow past it, which is just as
+   visible as not reserving space at all. The price row and meta text
+   below instead get a HARD height (with overflow hidden, and
+   line-clamp on meta) so every variant -- however many lines its own
+   copy actually wraps to -- is truncated/padded to the exact same box,
+   not just "at least" it. (For whichever tier the shop is actually
+   subscribed to, toggling cycle can also swap a plain "Current plan"
+   label for a full-size "Choose plan"/"Renew now" button; both are
+   forced to the same min-height instead, since neither ever wraps.)
+   margin-top: auto keeps every card's action pinned to the bottom. */
+.plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+.plan-card { border: 1px solid #e5e4de; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; }
+.plan-card.current { border-color: #534ab7; background: #f8f7fd; }
+.plan-card h4 { margin: 0 0 4px; font-size: 14px; }
+.plan-card .plan-price { font-size: 20px; font-weight: 700; margin: 4px 0; }
+.plan-card .plan-price small { font-size: 11px; font-weight: 400; color: #888780; }
+.plan-card .plan-price-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.plan-card .plan-price-row .plan-price { margin: 0; }
+.plan-card .plan-price-strike { font-size: 13px; color: #a9a79d; text-decoration: line-through; }
+.plan-card .plan-save-badge { font-size: 10.5px; font-weight: 600; color: #1a7f4b; background: #e6f4ec; border-radius: 10px; padding: 2px 8px; }
+.plan-card > .plan-price, .plan-card > .plan-price-row { height: 56px; overflow: hidden; }
+.plan-card .plan-meta {
+  font-size: 12px; line-height: 16px; color: #888780; margin-bottom: 10px;
+  height: 64px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
+}
+.plan-card .plan-current-label { font-size: 11.5px; color: #534ab7; font-weight: 600; }
+.plan-card > .btn-primary, .plan-card > .plan-current-label {
+  box-sizing: border-box; min-height: 34px; display: flex; align-items: center; justify-content: center; margin-top: auto;
+}
+.plan-contact-note {
+  width: 100%; border: 1px solid #d3d1c7; border-radius: 8px; padding: 6px 8px;
+  font-size: 12px; font-family: inherit; resize: vertical; margin-bottom: 6px;
+}
+.plan-error { color: #b00020; font-size: 12.5px; margin: 0 22px 10px; }
+.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+.preview-tile { border: 1px solid #e5e4de; border-radius: 8px; padding: 0; overflow: hidden; cursor: pointer; background: none; }
+.preview-tile:hover { border-color: #534ab7; }
+.preview-tile img { width: 100%; aspect-ratio: 1/1; object-fit: cover; display: block; }
+/* Image Transitions' picking step: all 4 stills are used, none
+   individually clickable -- no pointer/hover affordance. */
+.preview-tile.static { cursor: default; }
+.preview-tile.static:hover { border-color: #e5e4de; }
+.muted { color: #888780; font-size: 13px; }
+
+/* Video preview popup — mirrors circular-importer's VideoPreviewDialogComponent:
+   fixed 16:9 box, object-fit:contain (native fullscreen crops/pixelates these
+   clips), floating header bar instead of a separate row. */
+.video-preview-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.video-preview-box { position: relative; background: #000; overflow: hidden; border-radius: 8px; }
+.image-preview-box { width: min(80vw, 900px); height: min(80vh, 900px); }
+.image-preview-box .video-preview-body img { width: 100%; height: 100%; object-fit: contain; }
+.video-preview-header {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center;
+  justify-content: space-between; padding: 8px 8px 8px 16px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0));
+}
+.video-preview-title { font-size: 14px; font-weight: 600; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.video-preview-close { border: none; background: none; color: #fff; font-size: 20px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+.video-preview-body { position: absolute; inset: 0; }
+.video-preview-body video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+/* Per-product detail page */
+.back-link { display: inline-block; margin-bottom: 14px; padding: 0; }
+.detail-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.detail-header .thumb, .detail-header .thumb-placeholder { width: 56px; height: 56px; }
+.detail-header-title { margin: 0; font-size: 20px; }
+.detail-header-sub { margin: 2px 0 0; color: #888780; font-size: 13px; }
+.tabs { display: flex; gap: 4px; border-bottom: 0.5px solid #e5e4de; margin-bottom: 18px; }
+.tab {
+  border: none; background: none; color: #5f5e5a; font-size: 13.5px; font-weight: 500;
+  padding: 9px 4px; margin-right: 18px; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.tab.active { color: #23221f; font-weight: 600; border-bottom-color: #534ab7; }
+.detail-layout { display: flex; gap: 28px; align-items: flex-start; }
+.detail-main { flex: 1 1 auto; min-width: 0; }
+.detail-side { flex: 0 1 340px; min-width: 260px; }
+.detail-overview { background: #fff; border: 0.5px solid #e5e4de; border-radius: 12px; padding: 16px 18px; }
+.detail-player-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.detail-actions { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.detail-player { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.detail-player video { width: 100%; height: 100%; object-fit: contain; }
+.detail-player-empty {
+  width: 100%; aspect-ratio: 16/9; background: #f4f3ef; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; text-align: center; padding: 20px;
+}
+.slot-card-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; }
+.slot-card-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; background: #f4f3ef; }
+.slot-card-meta { display: flex; flex-direction: column; gap: 4px; }
+.slot-card-type { font-size: 13px; font-weight: 600; }
+.slot-card-body { padding: 0 12px 10px; }
+
+@media (max-width: 900px) {
+  .selection-layout { flex-direction: column; }
+  .detail-panel { width: 100%; position: static; }
+  .detail-layout { flex-direction: column; }
+  .detail-side { width: 100%; }
+}
+
+body.embed { padding-top: 12px; }
+
+/* Plans & Billing additions: notices, summary strip, tabs, payment history */
+.plan-notice { background: #e6f4ec; color: #1a5c3a; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 0 22px 14px; }
+.plan-notice a { color: inherit; font-weight: 600; }
+.plan-summary { font-size: 12.5px; color: #5f5e5a; margin: 0 22px 10px; }
+.plan-tabs { display: flex; gap: 4px; margin: 0 22px 14px; border-bottom: 1px solid #e5e4de; }
+.plan-tabs button { border: none; background: none; padding: 8px 12px; font-size: 13px; cursor: pointer; color: #5f5e5a; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.plan-tabs button.active { color: #534ab7; border-bottom-color: #534ab7; font-weight: 600; }
+.history-wrap { overflow-x: auto; }
+.history-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.history-table th, .history-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #ece9df; vertical-align: top; }
+.history-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.pay-status { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #f1efe8; font-size: 11.5px; }
+.pay-status.paid { background: #e6f4ec; color: #1a7f4b; } .pay-status.failed, .pay-status.canceled { background: #fbe9e9; color: #b00020; }
+.pay-status.pending, .pay-status.created { background: #fdf0d5; color: #8a5a00; }
+.pay-status.refunded, .pay-status.partially_refunded { background: #ece9f8; color: #534ab7; }
+
+.plan-footer { display: flex; justify-content: space-between; align-items: center; }
+.plan-footer-left { display: flex; gap: 4px; flex-wrap: wrap; }
