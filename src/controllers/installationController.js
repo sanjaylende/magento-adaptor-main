@@ -1,4 +1,5 @@
 // Endpoints the Magento extension calls to register and maintain its installation (server to server).
+const logger = require("../utils/logger");
 const registration = require("../services/registrationService");
 const tenants = require("../services/tenantService");
 const { encrypt, randomToken } = require("../utils/crypto");
@@ -10,7 +11,11 @@ async function register(req, res) {
   try {
     res.status(201).json(await registration.register(req.body || {}));
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.userMessage || "Registration failed" });
+    // 4xx = the caller's problem (bad URL, rejected token): a warning. Anything else is ours: an error with the stack.
+    const status = err.status || 500;
+    if (status >= 500) logger.error("Registration failed", { requestId: req.id, baseUrl: req.body && req.body.baseUrl, error: err });
+    else logger.warn("Registration refused", { requestId: req.id, baseUrl: req.body && req.body.baseUrl, status, reason: err.message });
+    res.status(status).json({ error: err.userMessage || "Registration failed", requestId: req.id });
   }
 }
 
@@ -19,6 +24,7 @@ async function syncStores(req, res) {
   try {
     res.json({ stores: await registration.resync(req.installation) });
   } catch (err) {
+    logger.warn("Store re-sync failed", { requestId: req.id, installationId: req.installation.id, error: err.message });
     res.status(502).json({ error: `Could not read the Magento store: ${err.message}` });
   }
 }
@@ -35,6 +41,7 @@ async function rotateSecret(req, res) {
 // Signed. The extension was uninstalled or disabled for good. Data is kept; the installation stops being served.
 async function uninstall(req, res) {
   await tenants.markUninstalled(req.installation);
+  logger.info("Installation uninstalled", { installationId: req.installation.id });
   res.json({ ok: true });
 }
 

@@ -15,6 +15,7 @@
 // pending payments); R1000 on a refund means "accepted", the outcome comes from a STATUS on the refund reference; the bank
 // page may add a service charge on top of `amount`, which is reported separately as `oth_charge`.
 const crypto = require("crypto");
+const logger = require("../utils/logger");
 const config = require("../config");
 const { hmacHex, safeEqual } = require("../utils/crypto");
 
@@ -67,7 +68,16 @@ function txnDate(d = new Date()) {
 const newReference = (prefix) => `${prefix}${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
 
 async function post(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+  } catch (err) {
+    // Never log the body: it carries the secure hash and customer details.
+    logger.error("ICICI request failed", { path: new URL(url).pathname, ms: Date.now() - startedAt, error: err.message });
+    throw Object.assign(new Error(`ICICI could not be reached: ${err.cause?.message || err.message}`), { status: 502, cause: err });
+  }
+  logger.debug("ICICI response", { path: new URL(url).pathname, status: res.status, ms: Date.now() - startedAt });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch { /* not JSON */ }
@@ -103,6 +113,7 @@ async function createPayment(order, { returnUrl, customerEmail, customerName, cu
   fields.secureHash = secureHash(fields, c.secretKey);
   const body = await post(endpoint(c, "v2/initiateSale"), fields);
   if (body.responseCode !== "R1000" || !body.redirectURI || !body.tranCtx) {
+    logger.error("ICICI did not start the payment", { merchantTxnNo: order.merchantTxnNo, responseCode: body.responseCode, description: body.respDescription });
     throw Object.assign(new Error(`ICICI could not start the payment (${body.responseCode || "no code"}): ${body.respDescription || "no description"}`), { status: 502 });
   }
   return { redirectUrl: `${body.redirectURI}?tranCtx=${encodeURIComponent(body.tranCtx)}`, gatewayRef: null };
@@ -113,6 +124,7 @@ async function createPayment(order, { returnUrl, customerEmail, customerName, cu
 async function verifyReturn(params) {
   const c = requireConfigured();
   if (!params.secureHash || !safeEqual(params.secureHash, secureHash(params, c.secretKey))) {
+    logger.warn("ICICI return with an invalid signature", { merchantTxnNo: params.merchantTxnNo });
     throw Object.assign(new Error("Invalid ICICI signature"), { status: 400 });
   }
   const code = String(params.responseCode || "");
@@ -148,6 +160,7 @@ async function refund(order, amountMinorToRefund, refundId) {
   const reference = `RF${refundId.replace(/-/g, "").slice(0, 14).toUpperCase()}`;
   const r = await command({ merchantTxnNo: reference, originalTxnNo: order.merchantTxnNo, amount: amountString(amountMinorToRefund), transactionType: "REFUND" });
   if (r.responseCode !== REFUND_ACCEPTED) {
+    logger.error("ICICI declined the refund request", { refundId, merchantTxnNo: order.merchantTxnNo, responseCode: r.responseCode, description: r.respDescription });
     throw Object.assign(new Error(`ICICI declined the refund request (${r.responseCode || "no code"}): ${r.respDescription || ""}`), { status: 502 });
   }
   return { status: "processing", gatewayRef: reference, raw: r };

@@ -1,5 +1,6 @@
 // Printable invoice / credit note page, opened from a short-lived signed link.
 const config = require("../config");
+const logger = require("../utils/logger");
 const { verifyToken } = require("../utils/crypto");
 const { query, asSystem } = require("../db/connection");
 const { escapeHtml, money } = require("../utils/html");
@@ -33,11 +34,16 @@ function renderInvoice(inv) {
 }
 
 async function show(req, res) {
-  const claims = verifyToken(req.params.token);
-  if (!claims || claims.typ !== "inv") return res.status(401).send("This invoice link has expired. Open it again from Plans & Billing.");
-  const { rows: [inv] } = await asSystem(() => query("SELECT * FROM invoices WHERE id = $1", [claims.id]));
-  if (!inv) return res.status(404).send("Invoice not found");
-  res.send(renderInvoice(inv));
+  try {
+    const claims = verifyToken(req.params.token);
+    if (!claims || claims.typ !== "inv") return res.status(401).send("This invoice link has expired. Open it again from Plans & Billing.");
+    const { rows: [inv] } = await asSystem(() => query("SELECT * FROM invoices WHERE id = $1", [claims.id]));
+    if (!inv) return res.status(404).send("Invoice not found");
+    res.send(renderInvoice(inv));
+  } catch (err) {
+    logger.error("Could not render an invoice", { requestId: req.id, error: err });
+    res.status(500).send("This invoice could not be shown right now. Please try again.");
+  }
 }
 
 module.exports = { show, renderInvoice };

@@ -20,6 +20,8 @@ const SPONSORED_ENDPOINT = "/api/v1/sponsored-ads/projects";
 //  - Regenerate (new base video + overlay): omit `projectId`, pass
 //    `forceNewProject` to ask for a brand-new Veo clip instead of reusing
 //    whatever already exists for that (theme, category, name) triple.
+const { loggedFetch } = require("../utils/httpLog");
+
 async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayFamily, noOverlay, externalRef, variantName, theme, category, name, values, forceNewProject, brandId, startImageUrl, aspectRatio, source }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
   if (!tenantId) throw new Error("tenantId is required");
@@ -58,7 +60,7 @@ async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayF
     source: source || undefined,
   };
 
-  const res = await fetch(`${baseUrl}${VVP_ENDPOINT}`, {
+  const res = await loggedFetch("flipick", `${baseUrl}${VVP_ENDPOINT}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
     body: JSON.stringify(payload),
@@ -97,7 +99,7 @@ async function generateSponsoredVideo({ baseUrl, apiKey, tenantId, product, reta
     video_spec: { aspect_ratio: "16:9", duration_secs: 8, include_vo: !!includeVo },
   };
 
-  const res = await fetch(`${baseUrl}${SPONSORED_ENDPOINT}`, {
+  const res = await loggedFetch("flipick", `${baseUrl}${SPONSORED_ENDPOINT}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
     body: JSON.stringify(payload),
@@ -121,7 +123,7 @@ async function deleteVvpVideos({ baseUrl, apiKey, tenantId, projectIds, variantI
   const cleanVariantIds = (variantIds || []).filter(Boolean);
   if (!cleanProjectIds.length && !cleanVariantIds.length) return { results: [] };
 
-  const res = await fetch(`${baseUrl}/api/v1/vvp-generation/videos/delete`, {
+  const res = await loggedFetch("flipick", `${baseUrl}/api/v1/vvp-generation/videos/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
     body: JSON.stringify({ tenant_id: tenantId, project_ids: cleanProjectIds, variant_ids: cleanVariantIds }),

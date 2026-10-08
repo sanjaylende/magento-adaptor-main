@@ -1,5 +1,6 @@
 // Product catalog endpoints: refresh from Magento, per-product attribute options and the default prompt.
 const config = require("../config");
+const logger = require("../utils/logger");
 const { tenant } = require("../context");
 const productService = require("../services/productService");
 const { getProductAttributeOptions } = require("../services/catalogService");
@@ -30,6 +31,7 @@ async function list(req, res) {
     try {
       await productService.refreshProducts();
     } catch (err) {
+      logger.error("Catalog load failed", { requestId: req.id, error: err });
       return res.status(502).json({ error: err.message, products: [] });
     }
   }
@@ -49,6 +51,7 @@ async function refresh(req, res) {
     await refreshGeneratedVideoUrls();
     res.json({ ok: true, count: productService.list().length });
   } catch (err) {
+    logger.error("Catalog refresh failed", { requestId: req.id, error: err });
     res.status(502).json({ error: err.message });
   }
 }
@@ -61,6 +64,7 @@ async function productAttributes(req, res) {
   try {
     res.json({ options: await getProductAttributeOptions(product, tenant().magento) });
   } catch (err) {
+    logger.warn("Could not read product attribute options", { requestId: req.id, uniqueTag: req.params.uniqueTag, error: err.message });
     res.status(502).json({ error: err.message, options: [] });
   }
 }
@@ -72,6 +76,7 @@ async function promptDefault(req, res) {
   try {
     res.json({ prompt: await getPromptDefault(product, videoType, config.flipick) });
   } catch (err) {
+    logger.warn("Could not build the default prompt", { requestId: req.id, error: err.message });
     res.status(502).json({ error: err.message });
   }
 }

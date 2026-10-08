@@ -1,6 +1,7 @@
 // Fixed-window rate limiter backed by Postgres, so the limit holds across several adapter processes.
 // Counted per installation and per store; expensive routes get a smaller budget under their own bucket name.
 const { query, asSystem } = require("../db/connection");
+const logger = require("../utils/logger");
 
 const WINDOW_SECONDS = 60;
 
@@ -21,6 +22,7 @@ function rateLimit({ name, limit, key }) {
       if (row.hits > limit) {
         const retry = Math.ceil((windowStart.getTime() + WINDOW_SECONDS * 1000 - Date.now()) / 1000);
         res.set("Retry-After", String(Math.max(1, retry)));
+        if (row.hits === limit + 1) logger.warn("Rate limit reached", { bucket: `${name}:${who}`, limit, path: req.path, requestId: req.id });
         return res.status(429).json({ error: "Too many requests. Try again shortly.", retryAfterSeconds: retry });
       }
       next();

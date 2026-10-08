@@ -5,6 +5,7 @@ const config = require("./config");
 const logger = require("./utils/logger");
 const routes = require("./routes");
 const errorHandler = require("./middleware/errorHandler");
+const requestLog = require("./middleware/requestLog");
 const { runMigrations, syncEntityTypes } = require("./db/migrate");
 const VideoSlot = require("./models/VideoSlot");
 const VideoVersion = require("./models/VideoVersion");
@@ -16,6 +17,7 @@ const adminUsers = require("./services/adminUserService");
 function createApp() {
   const app = express();
   app.set("trust proxy", config.isProduction ? 1 : false);
+  app.use(requestLog);
   // rawBody is kept for request signatures and idempotency hashes.
   app.use(express.json({ limit: "1mb", verify: (req, res, buf) => { req.rawBody = buf.toString("utf8"); } }));
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));

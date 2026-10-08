@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { query, asSystem } = require("../db/connection");
+const logger = require("../utils/logger");
 
 const template = fs.readFileSync(path.join(__dirname, "..", "..", "views", "index.html"), "utf8");
 
@@ -12,7 +13,7 @@ let originsCache = { at: 0, value: [] };
 async function frameAncestors() {
   if (Date.now() - originsCache.at > 60 * 1000) {
     const { rows } = await asSystem(() => query("SELECT base_url FROM installations WHERE status = 'active'"));
-    originsCache = { at: Date.now(), value: [...new Set(rows.map((r) => { try { return new URL(r.base_url).origin; } catch { return null; } }).filter(Boolean))] };
+    originsCache = { at: Date.now(), value: [...new Set(rows.map((r) => { try { return new URL(r.base_url).origin; } catch (err) { logger.warn("Installation has an invalid base URL; it cannot frame the app", { baseUrl: r.base_url }); return null; } }).filter(Boolean))] };
   }
   return ["'self'", ...originsCache.value].join(" ");
 }

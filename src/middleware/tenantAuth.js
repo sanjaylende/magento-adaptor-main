@@ -16,7 +16,13 @@ const { query, asSystem } = require("../db/connection");
 
 const MAX_SKEW_SECONDS = 300;
 
-const fail = (res, status, message) => res.status(status).json({ error: message });
+const logger = require("../utils/logger");
+
+// Every refusal is logged with the reason and caller address (never the signature, secret or token) to spot probing.
+const fail = (res, status, message, req) => {
+  logger.warn(`Auth refused: ${message}`, { status, ip: req && req.ip, path: req && req.path, requestId: req && req.id, installKey: req && req.get && req.get("X-Flipick-Key") });
+  return res.status(status).json({ error: message });
+};
 
 async function fromSignature(req) {
   const key = req.get("X-Flipick-Key");
@@ -56,14 +62,14 @@ function tenantAuth({ requireStore = true } = {}) {
     try {
       const bearer = /^Bearer\s+/i.test(req.get("Authorization") || "");
       const result = await (bearer ? fromSession(req) : fromSignature(req));
-      if (result.status) return fail(res, result.status, result.message);
+      if (result.status) return fail(res, result.status, result.message, req);
       const { installation, websiteId } = result;
       req.installation = installation;
       req.authKind = bearer ? "session" : "signature";
       if (!requireStore) return next();
 
       const store = websiteId != null ? await tenants.getStore(installation.id, websiteId) : null;
-      if (!store || store.status !== "active") return fail(res, 404, "Unknown store for this installation");
+      if (!store || store.status !== "active") return fail(res, 404, "Unknown store for this installation", req);
       req.store = store;
       const magento = await tenants.magentoConfigFor(installation, store);
       req.tenant = { installation, store, magento };

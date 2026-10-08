@@ -69,7 +69,7 @@ async function generateHeroProductVideo({ baseUrl, apiKey, productName, category
     callback_url: videoEngineCallbackUrl(),
   };
 
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/generate`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(payload),
@@ -127,7 +127,7 @@ async function generateImageTransitionVideo({ baseUrl, apiKey, productName, cate
     animation: animation || undefined,
   };
 
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/generate`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(payload),
@@ -143,7 +143,7 @@ async function generateImageTransitionVideo({ baseUrl, apiKey, productName, cate
 // queued/processing/rendering.
 async function pollVideoEngineJob({ baseUrl, apiKey, jobId }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/jobs/${jobId}`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/jobs/${jobId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const body = await res.json().catch(() => ({}));
@@ -181,7 +181,7 @@ async function pollVideoEngineJobUntilSettled({ baseUrl, apiKey, jobId, interval
 // seed an editable field).
 async function getCategoryDefault({ baseUrl, apiKey, category }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/category-defaults?category=${encodeURIComponent(category || "General")}`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/category-defaults?category=${encodeURIComponent(category || "General")}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const body = await res.json().catch(() => ({}));
@@ -220,7 +220,7 @@ async function generatePreviewImages({ baseUrl, apiKey, videoType, category, pro
     creative_brief: resolvedVideoType !== "lifestyle" ? creativeBrief || undefined : undefined,
   };
 
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/preview-images`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/preview-images`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(payload),
@@ -249,7 +249,7 @@ async function listOverlayFamilies({ baseUrl, apiKey, aspectRatio, retailerName 
   if (retailerName) params.set("brand_name", retailerName);
   const qs = params.toString();
   const url = `${baseUrl}/api/v2/video-engine/overlay-families${qs ? `?${qs}` : ""}`;
-  const res = await fetch(url, {
+  const res = await loggedFetch("video-engine", url, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const body = await res.json().catch(() => ({}));
@@ -273,6 +273,7 @@ async function listOverlayFamilies({ baseUrl, apiKey, aspectRatio, retailerName 
 // fields the backend can unambiguously map (price/strike/title/subtitle) --
 // only the four attribute keys that mapping actually uses are forwarded,
 // each prefixed attr_ so they can't collide with aspect_ratio/brand_name.
+const { loggedFetch } = require("../utils/httpLog");
 const PRODUCT_ATTRS_FORWARDED = ["price", "mrp", "productName", "category"];
 async function getOverlayFamilyPreview({ baseUrl, apiKey, familyName, aspectRatio, retailerName, productAttributes }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
@@ -285,7 +286,7 @@ async function getOverlayFamilyPreview({ baseUrl, apiKey, familyName, aspectRati
     }
   }
   const url = `${baseUrl}/api/v2/video-engine/overlay-families/${encodeURIComponent(familyName)}/preview?${params.toString()}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const res = await loggedFetch("video-engine", url, { headers: { Authorization: `Bearer ${apiKey}` } });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(`Fetching overlay preview failed (${res.status}): ${body.error || JSON.stringify(body)}`);
@@ -303,7 +304,7 @@ async function refreshProjectVideoUrls({ baseUrl, apiKey, projectIds }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
   if (!Array.isArray(projectIds) || !projectIds.length) return {};
 
-  const res = await fetch(`${baseUrl}/api/v2/video-engine/projects/refresh-urls`, {
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/projects/refresh-urls`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ project_ids: projectIds }),

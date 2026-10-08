@@ -74,9 +74,11 @@ async function createOrder({ kind, planCode, interval, currency, topupUsdCents, 
     });
     await query("UPDATE payment_orders SET status = 'pending', redirect_url = $2, gateway_ref = COALESCE($3, gateway_ref) WHERE id = $1", [order.id, started.redirectUrl, started.gatewayRef || null]);
     await query("INSERT INTO payment_attempts (order_id, status, response) VALUES ($1, 'initiated', $2)", [order.id, JSON.stringify({ redirectUrl: started.redirectUrl })]);
+    logger.info("Payment order created", { orderId: order.id, kind, gateway: gateway.name, totalMinor: tax.totalMinor, currency, storeId: store.id });
     await audit.record({ actorType: "merchant", merchantId: merchant.id, installationId: installation.id, storeId: store.id, action: "payment.order_created", after: { orderId: order.id, kind, total: tax.totalMinor, currency } });
     return { order: { ...order, status: "pending", redirectUrl: started.redirectUrl }, redirectUrl: started.redirectUrl };
   } catch (err) {
+    logger.error("Gateway could not start the payment", { orderId: order.id, gateway: gateway.name, error: err });
     await query("UPDATE payment_orders SET status = 'failed', failure_reason = $2 WHERE id = $1", [order.id, err.message.slice(0, 500)]);
     throw err;
   }
@@ -116,7 +118,10 @@ async function applyGatewayResult(gatewayName, result, { eventKey } = {}) {
       [gatewayName, key, order.id, JSON.stringify(result.raw || result)]
     );
     // The same event again: nothing to do (the first run already applied it).
-    if (!inserted.rowCount) return { order, duplicate: true };
+    if (!inserted.rowCount) {
+      logger.info("Duplicate gateway event ignored", { orderId: order.id, gateway: gatewayName, status: result.status });
+      return { order, duplicate: true };
+    }
 
     await query("INSERT INTO payment_attempts (order_id, status, response) VALUES ($1, $2, $3)", [order.id, `gateway_${result.status}`, JSON.stringify(result.raw || {})]);
 
@@ -126,6 +131,7 @@ async function applyGatewayResult(gatewayName, result, { eventKey } = {}) {
 
     if (result.status === "failed") {
       await query("UPDATE payment_orders SET status = 'failed', failure_reason = $2 WHERE id = $1 AND status IN ('created', 'pending')", [order.id, (result.failureReason || "Payment failed").slice(0, 500)]);
+      logger.warn("Payment failed", { orderId: order.id, storeId: order.storeId, reason: result.failureReason });
       await audit.record({ actorType: "gateway", storeId: order.storeId, action: "payment.failed", after: { orderId: order.id, reason: result.failureReason } });
       await notify(order.storeId, "payment_failed", `payment_failed:${order.id}`, { orderId: order.id, reason: result.failureReason });
       return { order: { ...order, status: "failed" }, duplicate: false };
@@ -145,6 +151,7 @@ async function applyGatewayResult(gatewayName, result, { eventKey } = {}) {
       await billing.addCredit({ storeId: order.storeId, usdCents: order.topupUsdCents, kind: "topup", refType: "payment_order", refId: order.id });
     }
     const invoice = await issueInvoice({ ...order, status: "paid" });
+    logger.info("Payment succeeded", { orderId: order.id, kind: order.kind, storeId: order.storeId, invoice: invoice.number });
     await audit.record({ actorType: "gateway", storeId: order.storeId, action: "payment.succeeded", after: { orderId: order.id, invoice: invoice.number } });
     return { order: { ...order, status: "paid" }, invoice, duplicate: false };
   }));
@@ -190,7 +197,7 @@ async function reconcilePending() {
         await asSystem(() => query("UPDATE payment_orders SET status = 'canceled', failure_reason = 'Not completed within 24 hours' WHERE id = $1 AND status = 'pending'", [order.id]));
       }
     } catch (err) {
-      logger.error("Reconcile failed for", order.merchantTxnNo, err.message);
+      logger.error("Reconcile failed", { merchantTxnNo: order.merchantTxnNo, orderId: order.id, error: err });
     }
   }
   return rows.length;
@@ -261,6 +268,7 @@ async function refundOrder({ orderId, amountMinor, reason, entitlementAction = "
     try {
       outcome = await getGateway(order.gateway).refund(order, amountMinor, refundId);
     } catch (err) {
+      logger.error("Gateway refused to start the refund", { refundId, orderId, error: err });
       await query("UPDATE refunds SET status = 'failed', failure_reason = $2, processed_at = now() WHERE id = $1", [refundId, err.message.slice(0, 500)]);
       await audit.record({ actorType: actor.type, actorId: actor.id, storeId: order.storeId, action: "refund.failed", after: { refundId, orderId, error: err.message } });
       throw err;
@@ -298,6 +306,7 @@ async function completeRefund(refundId, gatewayRef, actor) {
       const take = Math.min(share, Math.max(0, balance));
       if (take > 0) await billing.addCredit({ storeId: order.storeId, usdCents: -take, kind: "refund", refType: "refund", refId: refundId });
     }
+    logger.info("Refund succeeded", { refundId, orderId: order.id, amountMinor: refund.amount_minor, entitlementAction: refund.entitlement_action });
     await audit.record({ actorType: actor.type, actorId: actor.id, storeId: order.storeId, action: "refund.succeeded", after: { refundId, orderId: order.id, amountMinor: refund.amount_minor, entitlementAction: refund.entitlement_action } });
   }));
 }
@@ -320,7 +329,7 @@ async function settleProcessingRefunds() {
         await audit.record({ actorType: "gateway", storeId: row.store_id, action: "refund.failed", after: { refundId: row.id, reason: result.reason } });
       }
     } catch (err) {
-      logger.error("Could not settle refund", row.id, err.message);
+      logger.error("Could not settle refund", { refundId: row.id, error: err });
     }
   }
   return rows.length;

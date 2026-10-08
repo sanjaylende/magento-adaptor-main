@@ -7,6 +7,7 @@
 const { AsyncLocalStorage } = require("async_hooks");
 const { Pool, types } = require("pg");
 const config = require("../config");
+const logger = require("../utils/logger");
 
 types.setTypeParser(20, (v) => Number(v));        // BIGINT -> number (ids and minor-unit money stay well below 2^53)
 types.setTypeParser(1700, (v) => Number(v));      // NUMERIC -> number
@@ -18,12 +19,19 @@ let adminPool = null;
 const ssl = () => (config.database.ssl ? { rejectUnauthorized: false } : false);
 
 function pool() {
-  if (!appPool) appPool = new Pool({ connectionString: config.database.url, ssl: ssl(), max: 10 });
+  if (!appPool) {
+    appPool = new Pool({ connectionString: config.database.url, ssl: ssl(), max: 10 });
+    // An idle connection dropped by the server (restart, failover) emits "error"; unhandled it would kill the process.
+    appPool.on("error", (err) => logger.error("PostgreSQL pool error (idle client)", { error: err }));
+  }
   return appPool;
 }
 
 function migrationPool() {
-  if (!adminPool) adminPool = new Pool({ connectionString: config.database.adminUrl, ssl: ssl(), max: 2 });
+  if (!adminPool) {
+    adminPool = new Pool({ connectionString: config.database.adminUrl, ssl: ssl(), max: 2 });
+    adminPool.on("error", (err) => logger.error("PostgreSQL admin pool error (idle client)", { error: err }));
+  }
   return adminPool;
 }
 
@@ -59,7 +67,7 @@ async function tx(fn) {
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch((rollbackErr) => logger.warn("ROLLBACK failed", { error: rollbackErr.message }));
     throw err;
   } finally {
     client.release();

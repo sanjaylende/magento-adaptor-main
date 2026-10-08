@@ -2,6 +2,7 @@
 // response is stored; a repeat with the same key and body replays that response; a repeat with a different body is
 // rejected; a repeat while the first is still running gets 409.
 const { query, asSystem } = require("../db/connection");
+const logger = require("../utils/logger");
 const { sha256Hex } = require("../utils/crypto");
 
 function idempotent() {
@@ -18,13 +19,14 @@ function idempotent() {
         const { rows: [prior] } = await asSystem(() => query("SELECT * FROM idempotency_keys WHERE installation_id = $1 AND idem_key = $2", [req.installation.id, idemKey]));
         if (prior.request_hash !== hash) return res.status(422).json({ error: "Idempotency-Key was already used with a different request" });
         if (prior.status_code == null) return res.status(409).json({ error: "A request with this Idempotency-Key is still being processed" });
+        logger.info("Idempotent replay", { idemKey, installationId: req.installation.id, path: req.path });
         res.set("Idempotent-Replay", "true");
         return res.status(prior.status_code).json(prior.response_body);
       }
       const originalJson = res.json.bind(res);
       res.json = (body) => {
         asSystem(() => query("UPDATE idempotency_keys SET status_code = $3, response_body = $4 WHERE installation_id = $1 AND idem_key = $2", [req.installation.id, idemKey, res.statusCode, JSON.stringify(body)]))
-          .catch(() => {});
+          .catch((err) => logger.warn("Could not store an idempotent response", { idemKey, error: err.message }));
         return originalJson(body);
       };
       next();
