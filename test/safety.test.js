@@ -37,6 +37,7 @@ test("other unsafe production settings are refused", () => {
   assert.match(productionProblems({ ...good, PUBLIC_BASE_URL: "http://magento.example.com" }).join(), /https/);
   assert.match(productionProblems({ ...good, DATABASE_URL: "postgresql://adapter_app:adapter_app_local@db:5432/x" }).join(), /development password/);
   assert.match(productionProblems({ ...good, DB_SSL: "disable" }).join(), /DB_SSL/);
+  assert.match(productionProblems({ ...good, DB_SSL: "no-verify" }).join(), /does not verify the database certificate/);
   assert.match(productionProblems({ ...good, ICICI_PG_BASE_URL: "https://pgpayuat.icicibank.com" }).join(), /test \(UAT\)/);
   assert.match(productionProblems({ ...good, ICICI_PG_SECRET_KEY: "" }).join(), /ICICI_PG_SECRET_KEY/);
 });
