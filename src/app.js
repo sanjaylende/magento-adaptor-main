@@ -13,6 +13,7 @@ const StoreSetting = require("./models/StoreSetting");
 const videoVersions = require("./repositories/VideoVersionRepository");
 const scheduler = require("./services/scheduler");
 const adminUsers = require("./services/adminUserService");
+const { assertSafeConfig } = require("./config/safety");
 
 function createApp() {
   const app = express();
@@ -39,6 +40,7 @@ async function start() {
     logger.error("Unhandled promise rejection:", reason);
   });
 
+  assertSafeConfig(); // production only: refuses the mock gateway, plain-HTTP address, development passwords
   await runMigrations();
   await syncEntityTypes([VideoSlot, VideoVersion, StoreSetting]);
   await adminUsers.ensureBootstrapAdmin();
