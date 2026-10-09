@@ -14,7 +14,7 @@ const config = require("../config");
 const baseHeaders = helmet({
   contentSecurityPolicy: false,   // set per area below
   frameguard: false,              // framing is decided per area below (the UI shell is meant to be framed)
-  hsts: config.isProduction ? { maxAge: 31536000, includeSubDomains: true } : false,
+  hsts: false,                    // set below, per request, only when running in production (a plain-http development server must not send it)
   referrerPolicy: { policy: "no-referrer" },
   crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }, // the payment page opens in a new tab
   crossOriginResourcePolicy: { policy: "same-origin" },
@@ -40,6 +40,7 @@ function area(path) {
 function securityHeaders(req, res, next) {
   baseHeaders(req, res, (err) => {
     if (err) return next(err);
+    if (config.isProduction) res.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     res.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()");
     const kind = area(req.path);
     if (kind === "api" || kind === "admin") {

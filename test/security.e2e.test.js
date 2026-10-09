@@ -56,9 +56,82 @@ describe("security hardening", () => {
       }
     });
 
+    it("/.well-known/security.txt says where to report a problem and when the file expires", async () => {
+      const res = await get("/.well-known/security.txt");
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get("content-type"), /text/plain/);
+      const body = await res.text();
+      assert.match(body, /^Contact: (mailto:|https://)/m);
+      assert.match(body, /^Expires: d{4}-d{2}-d{2}T/m);
+    });
+
     it("API and staff pages are never cached", async () => {
       assert.equal((await get("/api/bootstrap")).headers.get("cache-control"), "no-store");
       assert.equal((await get("/admin/login")).headers.get("cache-control"), "no-store");
+    });
+  });
+
+  // ---- M3: CORS and cookie policy ----
+  describe("M3 CORS and cookies", () => {
+    const evil = "https://evil.example";
+    it("no cross-origin browser access is granted: no CORS headers on simple requests or on preflight", async () => {
+      for (const p of ["/api/bootstrap", "/api/session", "/api/v1/register", "/admin/login", "/", "/static/css/app.css", "/dl/abcdefghijklmnop", "/img/abcdefghijklmnop"]) {
+        const res = await fetch(BASE() + p, { headers: { Origin: evil }, redirect: "manual" });
+        assert.equal(res.headers.get("access-control-allow-origin"), null, p);
+        assert.equal(res.headers.get("access-control-allow-credentials"), null, p);
+      }
+      const pre = await fetch(BASE() + "/api/session", { method: "OPTIONS", headers: { Origin: evil, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type" } });
+      assert.equal(pre.headers.get("access-control-allow-origin"), null);
+      assert.equal(pre.headers.get("access-control-allow-headers"), null);
+    });
+
+    it("the staff cookie cannot be sent from another site (SameSite=Strict) and is scoped to /admin; no cookie is set by API routes", async () => {
+      const api = await h.api("GET", "/api/bootstrap");
+      assert.equal(api.headers.get("set-cookie"), null);
+      const login = await fetch(`${BASE()}/admin/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "email=staff@test.local&password=staff-password-1" });
+      const cookie = login.headers.getSetCookie().find((c) => c.startsWith("fl_admin="));
+      assert.match(cookie, /HttpOnly/i);
+      assert.match(cookie, /SameSite=Strict/i);
+      assert.match(cookie, /Path=\/admin/);
+      assert.doesNotMatch(cookie, /Domain=/i, "host-only cookie");
+    });
+
+    it("in production the cookie is Secure and HSTS is sent; in development neither", async () => {
+      const config = require("../src/config");
+      await db.asSystem(() => db.query("DELETE FROM rate_limits"));
+      config.isProduction = true;
+      try {
+        const login = await fetch(`${BASE()}/admin/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "email=staff@test.local&password=staff-password-1" });
+        assert.match(login.headers.getSetCookie().find((c) => c.startsWith("fl_admin=")), /; Secure/);
+        const res = await fetch(BASE() + "/admin/login");
+        assert.equal(res.headers.get("strict-transport-security"), "max-age=31536000; includeSubDomains");
+      } finally { config.isProduction = false; }
+      assert.equal((await fetch(BASE() + "/admin/login")).headers.get("strict-transport-security"), null);
+    });
+  });
+
+  // ---- M5: database least privilege ----
+  describe("M5 database roles", () => {
+    it("the running service connects as a role without superuser, BYPASSRLS, CREATEDB or CREATEROLE", async () => {
+      const { rows: [role] } = await db.query("SELECT current_user AS name, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = current_user");
+      assert.equal(role.name, "adapter_app");
+      assert.deepEqual([role.rolsuper, role.rolbypassrls, role.rolcreatedb, role.rolcreaterole], [false, false, false, false]);
+    });
+
+    it("row-level security is on for every tenant table, and without a tenant context the service sees no tenant rows", async () => {
+      const { rows } = await db.asSystem(() => db.query(
+        `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname IN ('eav_entity', 'store_subscriptions', 'payment_orders', 'invoices', 'credit_ledger', 'usage_events')`));
+      assert.ok(rows.length >= 5, "the tenant tables exist");
+      for (const t of rows) assert.equal(t.relrowsecurity, true, `${t.relname} has row-level security`);
+      // no tenant and no system context: nothing is visible
+      const raw = await db.query("SELECT count(*)::int AS n FROM payment_orders");
+      assert.equal(raw.rows[0].n, 0);
+    });
+
+    it("the application role cannot change the schema", async () => {
+      await assert.rejects(() => db.query("CREATE TABLE should_not_exist (id int)"), /permission denied/);
+      await assert.rejects(() => db.query("DROP TABLE stores"), /must be owner|permission denied/);
     });
   });
 
