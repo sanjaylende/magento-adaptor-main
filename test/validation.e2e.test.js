@@ -95,6 +95,9 @@ describe("input validation", () => {
       bad(await call("GET", "/api/overlay-families?aspectRatio=7:3"), "unsupported aspect ratio in the query");
       bad(await call("GET", "/api/products?refresh=maybe"), "bad refresh flag");
       bad(await call("GET", "/api/billing/orders/" + encodeURIComponent("1;select 1")), "bad order id");
+      bad(await call("GET", "/api/billing/orders/12345"), "an invoice-style number used as an order id");
+      bad(await call("GET", "/api/billing/invoices/00000000-0000-0000-0000-000000000000/link"), "an order id used as an invoice number (used to cause a database error)");
+      assert.equal((await call("GET", "/api/billing/invoices/999999/link")).status, 404, "an unknown invoice number is a plain 404");
       ok(await call("GET", "/api/status/" + TAG + "/hero_product"));
       ok(await call("GET", "/api/products?cache=1234"), "unknown query names are ignored");
     });

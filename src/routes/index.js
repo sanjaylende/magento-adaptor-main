@@ -91,10 +91,10 @@ forStore.get("/generated/:uniqueTag/:videoType/download-link", validate({ params
 
 forStore.get("/billing/status", h(billing.status));
 forStore.post("/billing/checkout", limitBody(2 * 1024), idempotent(), validate({ body: S.body.checkout }), h(billing.checkout));
-forStore.get("/billing/orders/:id", validate({ params: S.params.id }), h(billing.orderStatus));
+forStore.get("/billing/orders/:id", validate({ params: S.params.orderId }), h(billing.orderStatus));
 forStore.post("/billing/cancel", validate({ body: S.body.emptyish }), h(billing.cancel));
 forStore.get("/billing/history", h(billing.history));
-forStore.get("/billing/invoices/:id/link", validate({ params: S.params.id }), h(billing.invoiceLink));
+forStore.get("/billing/invoices/:id/link", validate({ params: S.params.invoiceId }), h(billing.invoiceLink));
 
 router.use("/api", forStore);
 

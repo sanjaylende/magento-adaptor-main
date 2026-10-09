@@ -67,7 +67,8 @@ const params = {
   token: z.object({ token: signedToken }),
   txn: z.object({ txn: txnNo }),
   gateway: z.object({ gateway }),
-  id: z.object({ id: entityId }),
+  orderId: z.object({ id: z.string().regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, "must be an order id (UUID)") }),
+  invoiceId: z.object({ id: z.string().regex(/^[0-9]{1,18}$/, "must be an invoice number (digits)") }),
   overlayName: z.object({ name: text(200, 1) }),
 };
 
