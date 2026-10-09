@@ -27,6 +27,8 @@ function scrub(text) {
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [redacted]")   // first, so "Authorization: Bearer xyz" keeps nothing of xyz
     .replace(/(consumer_(?:key|secret)=)[^&\s"']+/gi, "$1[redacted]")
     .replace(/((?:access_?token|api_?key|token|secret|password|signature|secure_?hash|authorization)["']?\s*[=:]\s*["']?)(?!\[redacted\]|Bearer \[redacted\])[^&\s"',}]+/gi, "$1[redacted]")
+    .replace(/(\/(?:dl|img|invoice)\/)[A-Za-z0-9_.-]{10,}/g, "$1[token]")                        // signed links carry a token in the path
+    .replace(/(oauth_(?:signature|nonce|consumer_key|token)=)[^&\s"']+/gi, "$1[redacted]")       // OAuth parameters in a URL
     .replace(/\b(fk_[A-Za-z0-9_-]{4})[A-Za-z0-9_-]{6,}/g, "$1[redacted]")                       // install keys
     .replace(/([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, "$1***@$2"); // e-mail addresses
 }

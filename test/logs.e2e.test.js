@@ -71,6 +71,15 @@ describe("log contents", () => {
       await fetch(`${BASE()}/admin/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ email: "staff@test.local", password }) });
     }
     secrets.set("ADAPTER_SECRET_KEY", process.env.ADAPTER_SECRET_KEY);
+    // signed links (photo, download, invoice) carry a token in the path: it must not be logged
+    const { signToken } = require("../src/utils/crypto");
+    const imgToken = signToken({ typ: "img", u: "http://127.0.0.1:1/none.jpg" }, 60);
+    const dlToken = signToken({ typ: "dl", inst: 1, store: 1, tag: "t", vt: "hero_product" }, 60);
+    secrets.set("photo link token", imgToken);
+    secrets.set("download link token", dlToken);
+    await fetch(`${BASE()}/img/${imgToken}`);
+    await fetch(`${BASE()}/dl/${dlToken}`);
+    await fetch(`${BASE()}/invoice/${dlToken}`);
 
     const text = captured.join("\n");
     assert.ok(captured.length > 20, `expected a realistic amount of log output, got ${captured.length} lines`);
