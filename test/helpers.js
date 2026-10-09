@@ -29,6 +29,9 @@ function useTestEnvironment() {
     BILLING_GRACE_DAYS: "3",
     GST_RATE_BP: "1800",
     NODE_ENV: "test",
+    // Tests must never reach a real video engine (it may be running on this machine and would spend real credits).
+    FLIPICK_VIDEO_ENGINE_BASE_URL: "http://127.0.0.1:1", FLIPICK_VIDEO_ENGINE_API_KEY: "test", FLIPICK_SPONSORED_ADS_BASE_URL: "http://127.0.0.1:1",
+    FLIPICK_VVP_API_KEY: "test", FLIPICK_SPONSORED_ADS_API_KEY: "test", LOG_LEVEL: "error",
   });
 }
 

@@ -11,13 +11,21 @@ const tenants = require("../services/tenantService");
 const audit = require("../services/auditService");
 const { perIp } = require("../middleware/rateLimit");
 const asyncHandler = require("../middleware/asyncHandler");
+const { validate } = require("../middleware/validate");
+const S = require("../validation/schemas");
 const v = require("./views");
 
 const router = express.Router();
 const COOKIE = "fl_admin";
 const PENDING_COOKIE = "fl_admin_2fa"; // password accepted, second factor still to be entered (5 minutes)
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-const q =(sql, params) => asSystem(() => query(sql, params));
+const q = (sql, params) => asSystem(() => query(sql, params));
+
+// :id in the path must look like an id (digits, or a UUID for payments): anything else is a plain 404, never a database error.
+router.param("id", (req, res, next, id) => {
+  const ok = req.path.startsWith("/admin/payments/") ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) : /^[0-9]{1,18}$/.test(id);
+  return ok ? next() : res.status(404).send("Not found");
+});
 
 function cookies(req) {
   return Object.fromEntries((req.headers.cookie || "").split(";").map((c) => c.trim().split(/=(.*)/s).slice(0, 2)).filter(([k]) => k));
@@ -78,7 +86,7 @@ const SIGN_IN_FAILED = "Wrong email or password, or the account is locked for a 
 router.get("/admin/login", (req, res) => res.send(v.loginPage(req.query.err)));
 
 // Step 1: e-mail and password. A locked account answers exactly like a wrong password.
-router.post("/admin/login", perIp("admin-login", 10), asyncHandler(async (req, res) => {
+router.post("/admin/login", perIp("admin-login", 10), validate({ body: S.admin.login }), asyncHandler(async (req, res) => {
   const email = String((req.body || {}).email || "").slice(0, 254);
   const result = await users.login(email, String((req.body || {}).password || "").slice(0, 200));
   if (result.status !== "ok") {
@@ -97,7 +105,7 @@ router.post("/admin/login", perIp("admin-login", 10), asyncHandler(async (req, r
 }));
 
 // Step 2: the 6-digit code from the authenticator app. A wrong code counts towards the same lock-out; a code works once.
-router.post("/admin/login/2fa", perIp("admin-2fa", 20), asyncHandler(async (req, res) => {
+router.post("/admin/login/2fa", perIp("admin-2fa", 20), validate({ body: S.admin.code }), asyncHandler(async (req, res) => {
   const pending = cookies(req)[PENDING_COOKIE];
   const claims = pending && verifyToken(pending);
   if (!claims || claims.typ !== "admin2fa") return res.redirect("/admin/login");
@@ -125,12 +133,12 @@ router.use("/admin", asyncHandler(requireStaff));
 router.get("/admin/security", asyncHandler(async (req, res) => {
   render(req, res, { title: "Security", active: "/admin/security", body: v.securityPage({ enabled: req.staff.totpEnabled, csrfField, required: config.admin.require2fa }) });
 }));
-router.post("/admin/security/begin", asyncHandler(async (req, res) => {
+router.post("/admin/security/begin", validate({ body: S.admin.csrfOnly }), asyncHandler(async (req, res) => {
   if (req.staff.totpEnabled) return back(res, "/admin/security", null, "Two-factor is already on. Ask an operator to reset it if you lost your device.");
   const enrolment = await users.beginEnrollment(req.staff.id, req.staff.email);
   render(req, res, { title: "Security", active: "/admin/security", body: v.securityPage({ enabled: false, csrfField, secret: enrolment.secret, uri: enrolment.uri, required: config.admin.require2fa }) });
 }));
-router.post("/admin/security/confirm", perIp("admin-2fa-setup", 20), asyncHandler(async (req, res) => {
+router.post("/admin/security/confirm", perIp("admin-2fa-setup", 20), validate({ body: S.admin.codeCsrf }), asyncHandler(async (req, res) => {
   const ok = await users.confirmEnrollment(req.staff.id, (req.body || {}).code);
   if (!ok) return back(res, "/admin/security", null, "That code did not match. Start again and enter the code your app shows now.");
   await audit.record({ actorType: "staff", actorId: req.staff.email, action: "admin.2fa_enabled", ip: req.ip });
@@ -188,7 +196,7 @@ router.get("/admin/merchants/:id", asyncHandler(async (req, res) => {
       stores.rows.map((s) => [`<a href="/admin/stores/${s.id}">${v.e(s.name)}</a>`, v.e(s.base_currency.trim()), v.e(s.plan_code || "—"), v.statusTag(s.status || "—"), v.date(s.period_end)]))}` });
 }));
 
-router.post("/admin/merchants/:id", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/merchants/:id", requireAdminRole, validate({ body: S.admin.merchantProfile }), asyncHandler(async (req, res) => {
   const { rows: [before] } = await q("SELECT country_code, gst_number, billing_address FROM merchants WHERE id = $1", [req.params.id]);
   await q("UPDATE merchants SET country_code = $2, gst_number = $3, billing_address = $4 WHERE id = $1",
     [req.params.id, (req.body.country || "").toUpperCase().slice(0, 2) || null, req.body.gst || null, req.body.address || null]);
@@ -196,7 +204,7 @@ router.post("/admin/merchants/:id", requireAdminRole, asyncHandler(async (req, r
   back(res, `/admin/merchants/${req.params.id}`, "Saved");
 }));
 
-router.post("/admin/installations/:id/status", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/installations/:id/status", requireAdminRole, validate({ body: S.admin.installationStatus }), asyncHandler(async (req, res) => {
   const status = req.body.status === "suspended" ? "suspended" : "active";
   const { rows: [inst] } = await q("UPDATE installations SET status = $2 WHERE id = $1 RETURNING merchant_id, install_key", [req.params.id, status]);
   if (inst) tenants.invalidateInstallation(inst.install_key);
@@ -246,7 +254,7 @@ router.get("/admin/stores/:id", asyncHandler(async (req, res) => {
     <h2>Activity</h2>${v.table(["When", "Who", "Action"], log.rows.map((a) => [v.date(a.at), v.e(`${a.actor_type}${a.actor_id ? `:${a.actor_id}` : ""}`), v.e(a.action)]))}` });
 }));
 
-router.post("/admin/stores/:id/credit", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/stores/:id/credit", requireAdminRole, validate({ body: S.admin.credit }), asyncHandler(async (req, res) => {
   const usdCents = Math.round(Number(req.body.usd) * 100);
   const to = `/admin/stores/${req.params.id}`;
   if (!Number.isFinite(usdCents) || usdCents === 0) return back(res, to, null, "Enter a non-zero amount");
@@ -255,7 +263,7 @@ router.post("/admin/stores/:id/credit", requireAdminRole, asyncHandler(async (re
   back(res, to, "Credit updated");
 }));
 
-router.post("/admin/stores/:id/plan", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/stores/:id/plan", requireAdminRole, validate({ body: S.admin.activatePlan }), asyncHandler(async (req, res) => {
   const to = `/admin/stores/${req.params.id}`;
   const catalogue = await billing.loadCatalogue();
   if (!catalogue.plans[req.body.plan]?.prices?.[req.body.interval]?.[req.body.currency]) return back(res, to, null, "That plan, interval and currency is not offered");
@@ -264,13 +272,13 @@ router.post("/admin/stores/:id/plan", requireAdminRole, asyncHandler(async (req,
   back(res, to, "Plan activated");
 }));
 
-router.post("/admin/stores/:id/end-plan", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/stores/:id/end-plan", requireAdminRole, validate({ body: S.admin.csrfOnly }), asyncHandler(async (req, res) => {
   await asSystem(() => billing.endPlanNow(Number(req.params.id), actor(req)));
   back(res, `/admin/stores/${req.params.id}`, "Plan ended");
 }));
 
 // ---- Payments and refunds ----
-router.get("/admin/payments", asyncHandler(async (req, res) => {
+router.get("/admin/payments", validate({ query: S.admin.paymentsFilter }), asyncHandler(async (req, res) => {
   const status = req.query.status || "";
   const { rows } = await q(`SELECT o.*, s.name AS store, m.name AS merchant FROM payment_orders o JOIN stores s ON s.id = o.store_id JOIN merchants m ON m.id = o.merchant_id
       ${status ? "WHERE o.status = $1" : ""} ORDER BY o.created_at DESC LIMIT 200`, status ? [status] : []);
@@ -305,7 +313,7 @@ router.get("/admin/payments/:id", asyncHandler(async (req, res) => {
     <h2>Gateway events</h2>${v.table(["When", "Event", "Payload"], events.rows.map((g) => [v.date(g.created_at), v.e(g.event_key), `<code>${v.e(JSON.stringify(g.payload).slice(0, 160))}</code>`]))}` });
 }));
 
-router.post("/admin/payments/:id/refund", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/payments/:id/refund", requireAdminRole, validate({ body: S.admin.refund }), asyncHandler(async (req, res) => {
   const to = `/admin/payments/${req.params.id}`;
   try {
     await payments.refundOrder({
@@ -342,7 +350,7 @@ router.get("/admin/plans", asyncHandler(async (req, res) => {
       canEdit ? `<form class="inline" style="padding:0;border:0;margin:0" method="post" action="/admin/plans/rate">${csrfField}<input type="hidden" name="plan" value="${v.e(r.plan_code)}"><input type="hidden" name="type" value="${v.e(r.video_type)}"><input name="rate" type="number" step="0.01" value="${(r.usd_cents / 100).toFixed(2)}" style="width:110px"><button class="sec">Save</button></form>` : (r.usd_cents / 100).toFixed(2)]))}` });
 }));
 
-router.post("/admin/plans/price", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/plans/price", requireAdminRole, validate({ body: S.admin.planPrice }), asyncHandler(async (req, res) => {
   const amount = Math.round(Number(req.body.amount) * 100);
   const budget = Math.round(Number(req.body.budget) * 100);
   if (!(amount >= 0) || !(budget >= 0)) return back(res, "/admin/plans", null, "Enter valid amounts");
@@ -352,7 +360,7 @@ router.post("/admin/plans/price", requireAdminRole, asyncHandler(async (req, res
   back(res, "/admin/plans", "Price saved");
 }));
 
-router.post("/admin/plans/rate", requireAdminRole, asyncHandler(async (req, res) => {
+router.post("/admin/plans/rate", requireAdminRole, validate({ body: S.admin.planRate }), asyncHandler(async (req, res) => {
   const cents = Math.round(Number(req.body.rate) * 100);
   if (!(cents > 0)) return back(res, "/admin/plans", null, "Enter a valid rate");
   await q("UPDATE plan_video_rates SET usd_cents = $3 WHERE plan_code = $1 AND video_type = $2", [req.body.plan, req.body.type, cents]);

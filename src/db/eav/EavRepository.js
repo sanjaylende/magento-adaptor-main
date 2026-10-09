@@ -5,6 +5,13 @@ const { query } = require("../connection");
 
 const BACKEND_TABLES = ["varchar", "int", "text", "datetime", "decimal"];
 
+// The only dynamic part of any SQL in this service is the value-table name. It must be one of the five fixed names above, so a
+// bad attribute definition can never put arbitrary text into a statement.
+function safeTable(table) {
+  if (!BACKEND_TABLES.includes(table)) throw new Error(`Unsupported EAV value table "${table}"`);
+  return table;
+}
+
 function encode(value, frontend) {
   if (value === undefined || value === null) return null;
   if (frontend === "json") return JSON.stringify(value);
@@ -77,7 +84,7 @@ class EavRepository {
       bucket.get(attr.backend_type).push(value === null ? attr.attribute_id : [attr.attribute_id, value]);
     }
     for (const [table, ids] of deletes) {
-      await query(`DELETE FROM eav_entity_${table} WHERE entity_id = $1 AND attribute_id = ANY($2::bigint[])`, [entityId, ids]);
+      await query(`DELETE FROM eav_entity_${safeTable(table)} WHERE entity_id = $1 AND attribute_id = ANY($2::bigint[])`, [entityId, ids]);
     }
     for (const [table, pairs] of upserts) {
       const params = [entityId];
@@ -86,7 +93,7 @@ class EavRepository {
         return `($1, $${params.length - 1}, $${params.length})`;
       });
       await query(
-        `INSERT INTO eav_entity_${table} (entity_id, attribute_id, value) VALUES ${tuples.join(", ")}
+        `INSERT INTO eav_entity_${safeTable(table)} (entity_id, attribute_id, value) VALUES ${tuples.join(", ")}
          ON CONFLICT (entity_id, attribute_id) DO UPDATE SET value = EXCLUDED.value`,
         params
       );
@@ -105,7 +112,7 @@ class EavRepository {
     const found = [...byId.keys()];
     if (found.length) {
       await Promise.all(BACKEND_TABLES.map(async (table) => {
-        const { rows: vals } = await query(`SELECT entity_id, attribute_id, value FROM eav_entity_${table} WHERE entity_id = ANY($1::bigint[])`, [found]);
+        const { rows: vals } = await query(`SELECT entity_id, attribute_id, value FROM eav_entity_${safeTable(table)} WHERE entity_id = ANY($1::bigint[])`, [found]);
         for (const v of vals) {
           const attr = schema.byId.get(v.attribute_id);
           const entity = byId.get(v.entity_id);
@@ -132,7 +139,7 @@ class EavRepository {
     Object.entries(where).forEach(([code, raw], i) => {
       const attr = schema.byCode.get(code);
       if (!attr) throw new Error(`Unknown attribute "${code}"`);
-      joins.push(`JOIN eav_entity_${attr.backend_type} v${i} ON v${i}.entity_id = e.entity_id AND v${i}.attribute_id = ${add(attr.attribute_id)}`);
+      joins.push(`JOIN eav_entity_${safeTable(attr.backend_type)} v${i} ON v${i}.entity_id = e.entity_id AND v${i}.attribute_id = ${add(attr.attribute_id)}`);
       clauses.push(`v${i}.value = ${add(encode(raw, attr.frontend_type))}`);
     });
     const { rows } = await query(`SELECT e.entity_id FROM eav_entity e ${joins.join(" ")} WHERE ${clauses.join(" AND ")} ORDER BY e.entity_id`, params);
@@ -150,3 +157,4 @@ class EavRepository {
 }
 
 module.exports = new EavRepository();
+module.exports.safeTable = safeTable;
