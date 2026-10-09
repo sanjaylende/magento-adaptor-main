@@ -28,6 +28,8 @@ function createApp() {
   app.use("/static", express.static(path.join(__dirname, "..", "public")));
   app.use(require("./admin/routes"));
   app.use(routes);
+  // Anything that matched no route: a plain 404 that carries our security headers (Express's own page has a bare CSP and names the path).
+  app.use((req, res) => res.status(404).type("text/plain").send("Not found"));
   app.use(errorHandler);
   return app;
 }

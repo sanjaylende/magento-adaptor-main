@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { query, asSystem } = require("../db/connection");
 const logger = require("../utils/logger");
+const config = require("../config");
 
 const template = fs.readFileSync(path.join(__dirname, "..", "..", "views", "index.html"), "utf8");
 
@@ -23,7 +24,8 @@ async function index(req, res) {
   // videos may come from the store or the video engine over http(s). Framed only by registered Magento admins.
   res.set("Content-Security-Policy", [
     "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https: http:", "media-src 'self' blob: https: http:", "font-src 'self' data:",
+    // Plain-http photos and videos are allowed only while developing against a local store; production is https only.
+    `img-src 'self' data: blob: https:${config.isProduction ? "" : " http:"}`, `media-src 'self' blob: https:${config.isProduction ? "" : " http:"}`, "font-src 'self' data:",
     "connect-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
     `frame-ancestors ${await frameAncestors()}`,
   ].join("; "));

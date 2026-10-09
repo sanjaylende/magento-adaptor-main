@@ -65,6 +65,28 @@ describe("security hardening", () => {
       assert.match(body, /^Expires: [0-9]{4}-[0-9]{2}-[0-9]{2}T/m);
     });
 
+    it("an unknown path gets a plain 404 with the full set of security headers and does not echo the path", async () => {
+      const res = await get("/robots.txt?x=<script>alert(1)</script>");
+      assert.equal(res.status, 404);
+      const body = await res.text();
+      assert.equal(body, "Not found");
+      assert.match(res.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+      assert.match(res.headers.get("content-security-policy"), /form-action/);
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+    });
+
+    it("production allows photos and videos over https only; development also allows plain http", async () => {
+      const config = require("../src/config");
+      assert.match((await get("/")).headers.get("content-security-policy"), /img-src [^;]*http:/);
+      config.isProduction = true;
+      try {
+        const csp = (await get("/")).headers.get("content-security-policy");
+        assert.doesNotMatch(csp, /img-src[^;]* http:/);
+        assert.doesNotMatch(csp, /media-src[^;]* http:/);
+        assert.match(csp, /img-src[^;]*https:/);
+      } finally { config.isProduction = false; }
+    });
+
     it("API and staff pages are never cached", async () => {
       assert.equal((await get("/api/bootstrap")).headers.get("cache-control"), "no-store");
       assert.equal((await get("/admin/login")).headers.get("cache-control"), "no-store");
