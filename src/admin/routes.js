@@ -73,6 +73,8 @@ const requireAdminRole = (req, res, next) => (req.staff.role === "admin" ? next(
 // Page renderer with flash message and the csrf token available to forms.
 function render(req, res, { title, active, body }) {
   const flash = req.query.ok ? { kind: "ok", text: req.query.ok } : req.query.err ? { kind: "bad", text: req.query.err } : null;
+  // Reviewed: every value placed in these pages is escaped with e()/escapeHtml() or is a fixed string/number (reviewed, see test/validation.e2e.test.js and docs/security)
+  // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
   res.send(v.layout({ title, user: req.staff, active, body: body.replaceAll("{{CSRF}}", req.csrf), flash }));
 }
 
@@ -83,6 +85,8 @@ const major = (minor, cur) => v.money(minor, cur);
 
 // ---- Login ----
 const SIGN_IN_FAILED = "Wrong email or password, or the account is locked for a few minutes."; // one message: reveals nothing
+// Reviewed: loginPage() escapes the message with e()
+// nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
 router.get("/admin/login", (req, res) => res.send(v.loginPage(req.query.err)));
 
 // Step 1: e-mail and password. A locked account answers exactly like a wrong password.

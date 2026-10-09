@@ -20,8 +20,10 @@ function encrypt(plain) {
 function decrypt(blob) {
   const [version, iv, tag, data] = String(blob).split(":");
   if (version !== "v1") throw new Error("Unknown ciphertext format");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  const authTag = Buffer.from(tag, "base64url");
+  if (authTag.length !== 16) throw new Error("Invalid ciphertext"); // a shortened tag would weaken GCM authentication
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"), { authTagLength: 16 });
+  decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");
 }
 

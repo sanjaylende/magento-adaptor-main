@@ -16,7 +16,17 @@ const als = new AsyncLocalStorage();
 let appPool = null;
 let adminPool = null;
 
-const ssl = () => (config.database.ssl ? { rejectUnauthorized: false } : false);
+function ssl() {
+  const { sslMode, sslCaFile } = config.database;
+  if (sslMode === "disable") return false;
+  if (sslMode === "no-verify") {
+    logger.warn("DB_SSL=no-verify: the database connection is encrypted but the server certificate is NOT verified");
+    // Reviewed: explicit opt-in for local testing only; production start-up refuses DB_SSL=no-verify (src/config/safety.js).
+    // nosemgrep: problem-based-packs.insecure-transport.js-node.bypass-tls-verification.bypass-tls-verification
+    return { rejectUnauthorized: false };
+  }
+  return { rejectUnauthorized: true, ...(sslCaFile ? { ca: require("fs").readFileSync(sslCaFile, "utf8") } : {}) };
+}
 
 function pool() {
   if (!appPool) {

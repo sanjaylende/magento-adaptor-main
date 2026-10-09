@@ -22,6 +22,8 @@ async function returnPage(req, res) {
       body = `<h1 class="ok">Payment received</h1><p>Thank you. Your ${order.kind === "plan" ? "plan is now active" : "credit has been added"}. You can close this tab and go back to Video Generator.</p>`;
     } else if (order.status === "failed" || order.status === "canceled") {
       title = "Payment not completed";
+      // Reviewed: failureReason is escaped with escapeHtml()
+      // nosemgrep: javascript.express.security.injection.raw-html-format.raw-html-format
       body = `<h1 class="bad">Payment not completed</h1><p>${escapeHtml(order.failureReason || "The payment did not go through.")} No charge was applied. You can close this tab and try again.</p>`;
     } else {
       title = "Payment pending";
@@ -32,6 +34,8 @@ async function returnPage(req, res) {
     title = "Payment status";
     body = `<h1 class="bad">We could not verify this payment</h1><p>${escapeHtml(err.userMessage || "Please check Plans & Billing in Video Generator, or contact support with your payment reference.")}</p>`;
   }
+  // Reviewed: every value placed in these pages is escaped with e()/escapeHtml() or is a fixed string/number (reviewed, see test/validation.e2e.test.js and docs/security)
+  // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
   res.send(page(title, body));
 }
 

@@ -12,7 +12,9 @@ module.exports = {
     // The running service connects as a role without BYPASSRLS; migrations use the owner role.
     url: process.env.DATABASE_URL || "postgresql://adapter_app:adapter_app_local@127.0.0.1:5434/magento_adapter",
     adminUrl: process.env.DATABASE_ADMIN_URL || "postgresql://adapter_owner:adapter_owner_local@127.0.0.1:5434/magento_adapter",
-    ssl: process.env.DB_SSL === "require",
+    // disable | require (encrypted AND the server certificate is verified) | no-verify (encrypted, NOT verified: never in production)
+    sslMode: ["require", "no-verify"].includes(process.env.DB_SSL) ? process.env.DB_SSL : "disable",
+    sslCaFile: process.env.DB_SSL_CA || "",   // path to the CA certificate that signed the database server (cloud providers publish it)
   },
   // 32-byte hex key: encrypts installation secrets and Magento tokens at rest, and signs UI session tokens.
   secretKey: process.env.ADAPTER_SECRET_KEY || "",
