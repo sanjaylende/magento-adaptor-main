@@ -19,6 +19,12 @@ module.exports = {
   admin: {
     bootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL || "",
     bootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD || "",
+    maxFailedLogins: Number(process.env.ADMIN_MAX_FAILED_LOGINS || 5),   // consecutive failures before the account is locked
+    lockMinutes: Number(process.env.ADMIN_LOCK_MINUTES || 15),
+    idleMinutes: Number(process.env.ADMIN_IDLE_MINUTES || 30),            // signed out after this long without a request
+    sessionHours: Number(process.env.ADMIN_SESSION_HOURS || 8),           // absolute limit, however active
+    // Two-factor is mandatory in production: a staff member without it can only reach the enrolment page.
+    require2fa: process.env.ADMIN_REQUIRE_2FA != null && process.env.ADMIN_REQUIRE_2FA !== "" ? /^(1|true|yes)$/i.test(process.env.ADMIN_REQUIRE_2FA) : process.env.NODE_ENV === "production",
   },
   billing: {
     graceDays: Number(process.env.BILLING_GRACE_DAYS || 3),

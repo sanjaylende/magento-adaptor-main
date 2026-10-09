@@ -15,24 +15,48 @@ const v = require("./views");
 
 const router = express.Router();
 const COOKIE = "fl_admin";
-const SESSION_SECONDS = 8 * 3600;
-const q = (sql, params) => asSystem(() => query(sql, params));
+const PENDING_COOKIE = "fl_admin_2fa"; // password accepted, second factor still to be entered (5 minutes)
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const q =(sql, params) => asSystem(() => query(sql, params));
 
 function cookies(req) {
   return Object.fromEntries((req.headers.cookie || "").split(";").map((c) => c.trim().split(/=(.*)/s).slice(0, 2)).filter(([k]) => k));
 }
 
-const csrfFor = (sessionToken) => hmacHex(config.secretKey, `csrf:${sessionToken}`);
+// Stable for the whole sign-in (the cookie itself is re-issued on every request to slide the idle timeout).
+const csrfFor = (claims) => hmacHex(config.secretKey, `csrf:${claims.uid}:${claims.iat}`);
+
+function setCookie(res, name, value, maxAgeSeconds) {
+  res.append("Set-Cookie", `${name}=${value}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${config.isProduction ? "; Secure" : ""}`);
+}
+const clearCookie = (res, name) => setCookie(res, name, "", 0);
+
+// Issues (or re-issues) the session cookie. `iat` is when the person signed in and bounds the whole session; `last` is the
+// time of the latest request and drives the idle timeout. A session that must still enrol two-factor carries `enroll`.
+function startSession(res, userId, { iat = nowSeconds(), enroll = false } = {}) {
+  const ttl = Math.max(1, config.admin.sessionHours * 3600 - (nowSeconds() - iat));
+  const token = signToken({ typ: "admin", uid: userId, iat, last: nowSeconds(), ...(enroll ? { enroll: true } : {}) }, ttl);
+  setCookie(res, COOKIE, token, ttl);
+}
 
 // Session check for every /admin page except the login form.
 async function requireStaff(req, res, next) {
   const token = cookies(req)[COOKIE];
   const claims = token && verifyToken(token);
-  const user = claims && claims.typ === "admin" ? await users.getById(claims.uid) : null;
+  if (!claims || claims.typ !== "admin") return res.redirect("/admin/login");
+  if (nowSeconds() - (claims.last || 0) > config.admin.idleMinutes * 60) {
+    clearCookie(res, COOKIE);
+    return res.redirect("/admin/login?err=" + encodeURIComponent("You were signed out after a period of inactivity."));
+  }
+  const user = await users.getById(claims.uid);
   if (!user) return res.redirect("/admin/login");
   req.staff = user;
-  req.csrf = csrfFor(token);
+  req.csrf = csrfFor(claims);
   if (req.method === "POST" && !safeEqual((req.body || {})._csrf || "", req.csrf)) return res.status(403).send("Form expired. Go back, reload and try again.");
+  // Two-factor is mandatory (production): until it is set up the only page that opens is the set-up page.
+  const mustEnrol = config.admin.require2fa && !user.totpEnabled;
+  if (mustEnrol && !req.originalUrl.startsWith("/admin/security")) return res.redirect("/admin/security");
+  startSession(res, claims.uid, { iat: claims.iat, enroll: mustEnrol }); // slide the idle timeout
   next();
 }
 
@@ -50,24 +74,70 @@ const actor = (req) => ({ type: "staff", id: req.staff.email });
 const major = (minor, cur) => v.money(minor, cur);
 
 // ---- Login ----
-router.get("/admin/login", (req, res) => res.send(v.loginPage()));
+const SIGN_IN_FAILED = "Wrong email or password, or the account is locked for a few minutes."; // one message: reveals nothing
+router.get("/admin/login", (req, res) => res.send(v.loginPage(req.query.err)));
+
+// Step 1: e-mail and password. A locked account answers exactly like a wrong password.
 router.post("/admin/login", perIp("admin-login", 10), asyncHandler(async (req, res) => {
-  const user = await users.authenticate(req.body.email, req.body.password);
-  if (!user) {
-    await audit.record({ actorType: "staff", actorId: req.body.email, action: "admin.login_failed", ip: req.ip });
-    return res.status(401).send(v.loginPage("Wrong email or password"));
+  const email = String((req.body || {}).email || "").slice(0, 254);
+  const result = await users.login(email, String((req.body || {}).password || "").slice(0, 200));
+  if (result.status !== "ok") {
+    await audit.record({ actorType: "staff", actorId: email, action: result.status === "locked" ? "admin.login_locked" : "admin.login_failed", ip: req.ip });
+    return res.status(401).send(v.loginPage(SIGN_IN_FAILED));
   }
-  const token = signToken({ typ: "admin", uid: user.id }, SESSION_SECONDS);
-  res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=${SESSION_SECONDS}${config.isProduction ? "; Secure" : ""}`);
+  const { user } = result;
+  if (user.totpEnabled) {
+    setCookie(res, PENDING_COOKIE, signToken({ typ: "admin2fa", uid: user.id, iat: nowSeconds() }, 300), 300);
+    return res.send(v.twoFactorPage());
+  }
+  const mustEnrol = config.admin.require2fa;
+  startSession(res, user.id, { enroll: mustEnrol });
+  await audit.record({ actorType: "staff", actorId: user.email, action: "admin.login", ip: req.ip });
+  res.redirect(mustEnrol ? "/admin/security" : "/admin");
+}));
+
+// Step 2: the 6-digit code from the authenticator app. A wrong code counts towards the same lock-out; a code works once.
+router.post("/admin/login/2fa", perIp("admin-2fa", 20), asyncHandler(async (req, res) => {
+  const pending = cookies(req)[PENDING_COOKIE];
+  const claims = pending && verifyToken(pending);
+  if (!claims || claims.typ !== "admin2fa") return res.redirect("/admin/login");
+  const verdict = await users.verifyTotp(claims.uid, (req.body || {}).code);
+  const user = await users.getById(claims.uid);
+  if (!verdict.ok) {
+    await audit.record({ actorType: "staff", actorId: user ? user.email : String(claims.uid), action: "admin.2fa_failed", ip: req.ip });
+    return res.status(401).send(v.twoFactorPage(verdict.locked ? SIGN_IN_FAILED : "That code is not valid. Use the current code from your authenticator app."));
+  }
+  clearCookie(res, PENDING_COOKIE);
+  startSession(res, claims.uid);
   await audit.record({ actorType: "staff", actorId: user.email, action: "admin.login", ip: req.ip });
   res.redirect("/admin");
 }));
+
 router.get("/admin/logout", (req, res) => {
-  res.setHeader("Set-Cookie", `${COOKIE}=; Path=/admin; HttpOnly; Max-Age=0`);
+  clearCookie(res, COOKIE);
+  clearCookie(res, PENDING_COOKIE);
   res.redirect("/admin/login");
 });
 
 router.use("/admin", asyncHandler(requireStaff));
+
+// ---- Two-factor set-up (every signed-in staff member, for their own account) ----
+router.get("/admin/security", asyncHandler(async (req, res) => {
+  render(req, res, { title: "Security", active: "/admin/security", body: v.securityPage({ enabled: req.staff.totpEnabled, csrfField, required: config.admin.require2fa }) });
+}));
+router.post("/admin/security/begin", asyncHandler(async (req, res) => {
+  if (req.staff.totpEnabled) return back(res, "/admin/security", null, "Two-factor is already on. Ask an operator to reset it if you lost your device.");
+  const enrolment = await users.beginEnrollment(req.staff.id, req.staff.email);
+  render(req, res, { title: "Security", active: "/admin/security", body: v.securityPage({ enabled: false, csrfField, secret: enrolment.secret, uri: enrolment.uri, required: config.admin.require2fa }) });
+}));
+router.post("/admin/security/confirm", perIp("admin-2fa-setup", 20), asyncHandler(async (req, res) => {
+  const ok = await users.confirmEnrollment(req.staff.id, (req.body || {}).code);
+  if (!ok) return back(res, "/admin/security", null, "That code did not match. Start again and enter the code your app shows now.");
+  await audit.record({ actorType: "staff", actorId: req.staff.email, action: "admin.2fa_enabled", ip: req.ip });
+  const claims = verifyToken(cookies(req)[COOKIE]);
+  startSession(res, req.staff.id, { iat: claims.iat }); // the "must enrol" flag is gone
+  back(res, "/admin", "Two-factor sign-in is now on for your account.");
+}));
 
 // ---- Overview ----
 router.get("/admin", asyncHandler(async (req, res) => {

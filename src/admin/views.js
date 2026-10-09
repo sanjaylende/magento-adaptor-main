@@ -25,7 +25,7 @@ const STYLE = `
 `;
 
 function layout({ title, user, active, body, flash }) {
-  const links = [["/admin", "Overview"], ["/admin/merchants", "Merchants"], ["/admin/stores", "Stores"], ["/admin/payments", "Payments"], ["/admin/refunds", "Refunds"], ["/admin/plans", "Plans"], ["/admin/audit", "Audit log"]];
+  const links = [["/admin", "Overview"], ["/admin/merchants", "Merchants"], ["/admin/stores", "Stores"], ["/admin/payments", "Payments"], ["/admin/refunds", "Refunds"], ["/admin/plans", "Plans"], ["/admin/audit", "Audit log"], ["/admin/security", "My security"]];
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(title)} · Flipick admin</title><style>${STYLE}</style></head><body>
 <header><b>Flipick Video Admin</b><nav>${links.map(([href, label]) => `<a href="${href}" class="${active === href ? "on" : ""}">${label}</a>`).join("")}</nav>
 <span class="who">${e(user.email)} (${e(user.role)}) · <a href="/admin/logout">Sign out</a></span></header>
@@ -39,6 +39,19 @@ function loginPage(error) {
 <label>Email<input name="email" type="email" required autofocus></label><label>Password<input name="password" type="password" required></label><button>Sign in</button></form></main></body></html>`;
 }
 
+const twoFactorPage = (error) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Two-factor code · Flipick admin</title><style>${STYLE} main{max-width:360px;padding-top:80px}</style></head><body><main>
+<h1>Enter your code</h1><p class="muted">Open your authenticator app and type the 6-digit code for Flipick Video Admin.</p>${error ? `<div class="msg bad">${e(error)}</div>` : ""}
+<form method="post" action="/admin/login/2fa" class="inline" style="flex-direction:column;align-items:stretch"><label>6-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus></label><button>Verify</button></form></main></body></html>`;
+
+// "My security": switch on two-factor with any authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password).
+function securityPage({ enabled, csrfField, secret, uri, required }) {
+  if (enabled) return `<h1>My security</h1><div class="msg ok">Two-factor sign-in is on for your account.</div><p class="muted">Lost your phone? An operator resets it on the server with <code>node scripts/reset-2fa.js your@email</code>.</p>`;
+  if (secret) {
+    return `<h1>Set up two-factor sign-in</h1><ol><li>In your authenticator app choose <b>Add account</b>, then <b>Enter a setup key</b>.</li><li>Account name: <code>${e("Flipick Video Admin")}</code>. Key: <code style="font-size:16px;letter-spacing:1px">${e(secret)}</code> (time-based, 6 digits).</li><li>Type the code the app shows now:</li></ol><form method="post" action="/admin/security/confirm" class="inline">${csrfField}<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus><button>Turn on two-factor</button></form><p class="muted">Setup link for apps that accept it: <code>${e(uri)}</code></p>`;
+  }
+  return `<h1>My security</h1>${required ? `<div class="msg bad">Two-factor sign-in is required. Set it up to use the staff console.</div>` : ""}<p>Two-factor sign-in asks for a 6-digit code from your phone after the password.</p><form method="post" action="/admin/security/begin" class="inline">${csrfField}<button>Set up two-factor</button></form>`;
+}
+
 const table = (head, rows, empty = "Nothing to show") =>
   `<div class="wrap"><table><thead><tr>${head.map((h) => `<th class="${h.n ? "n" : ""}">${e(h.label || h)}</th>`).join("")}</tr></thead><tbody>${
     rows.length ? rows.map((r) => `<tr>${r.map((c, i) => `<td class="${head[i] && head[i].n ? "n" : ""}">${c}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${head.length}" class="muted">${e(empty)}</td></tr>`
@@ -47,4 +60,4 @@ const table = (head, rows, empty = "Nothing to show") =>
 const statusTag = (s) => `<span class="tag ${["paid", "succeeded", "active"].includes(s) ? "ok" : ["failed", "expired", "canceled", "refunded"].includes(s) ? "bad" : ["pending", "grace", "partially_refunded", "requested", "processing", "created"].includes(s) ? "warn" : ""}">${e(s)}</span>`;
 const date = (d) => (d ? e(new Date(d).toISOString().replace("T", " ").slice(0, 16)) : "—");
 
-module.exports = { layout, loginPage, table, statusTag, date, e, money };
+module.exports = { layout, loginPage, twoFactorPage, securityPage, table, statusTag, date, e, money };
