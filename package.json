@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node --use-system-ca server.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
-    "db:up": "docker compose up -d db"
+    "db:up": "docker compose up -d db",
+    "sbom": "npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-format JSON --output-file sbom.cdx.json",
+    "audit:prod": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

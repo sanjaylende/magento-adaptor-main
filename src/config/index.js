@@ -8,6 +8,8 @@ module.exports = {
   // Public address of this service: used in payment return URLs and links in invoices.
   publicBaseUrl: String(process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 4200}`).replace(/\/+$/, ""),
   isProduction: process.env.NODE_ENV === "production",
+  // Where researchers send vulnerability reports (served at /.well-known/security.txt).
+  securityContact: process.env.SECURITY_CONTACT || "mailto:security@flipick.com",
   database: {
     // The running service connects as a role without BYPASSRLS; migrations use the owner role.
     url: process.env.DATABASE_URL || "postgresql://adapter_app:adapter_app_local@127.0.0.1:5434/magento_adapter",

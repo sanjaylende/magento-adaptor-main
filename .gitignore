@@ -148,3 +148,5 @@ vite.config.ts.timestamp-*
 # Runtime video-record bookkeeping (server.js's generated.json) -- local
 # per-deployment state, not source
 data/
+sbom.cdx.json
+backups/

@@ -31,6 +31,15 @@ const h = asyncHandler;
 
 // ---- Public: the UI shell, onboarding, sessions, payment pages, signed links, webhooks ----
 router.get("/", h(page.index));
+// How to report a vulnerability (RFC 9116). SECURITY_CONTACT is an address or URL, e.g. mailto:security@example.com.
+router.get("/.well-known/security.txt", (req, res) => {
+  const expires = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+  res.type("text/plain").send(`Contact: ${config.securityContact}
+Expires: ${expires}
+Preferred-Languages: en
+Canonical: ${config.publicBaseUrl}/.well-known/security.txt
+`);
+});
 router.post("/api/v1/register", perIp("register", 10), limitBody(8 * 1024), validate({ body: S.body.register }), h(installation.register));
 router.post("/api/session", perIp("session", 60), limitBody(4 * 1024), validate({ body: S.body.session }), h(session.exchange));
 router.get("/billing/return", perIp("pay-return", 60), validate({ query: S.query.paymentReturn }), h(paymentWeb.returnPage));
