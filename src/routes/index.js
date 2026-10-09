@@ -21,6 +21,8 @@ const tenantAuth = require("../middleware/tenantAuth");
 const idempotent = require("../middleware/idempotency");
 const { validate, idempotencyKeyShape } = require("../middleware/validate");
 const { perIp, perInstallation, perStore } = require("../middleware/rateLimit");
+const { ipAllowList } = require("../middleware/ipAllowList");
+const config = require("../config");
 const generatedState = require("../services/generatedState");
 const S = require("../validation/schemas");
 
@@ -33,7 +35,8 @@ router.post("/api/v1/register", perIp("register", 10), validate({ body: S.body.r
 router.post("/api/session", perIp("session", 60), validate({ body: S.body.session }), h(session.exchange));
 router.get("/billing/return", perIp("pay-return", 60), validate({ query: S.query.paymentReturn }), h(paymentWeb.returnPage));
 router.post("/billing/return", perIp("pay-return", 60), validate({ query: S.query.paymentReturn, body: S.body.gatewayMessage }), h(paymentWeb.returnPage));
-router.post("/api/payments/callback/:gateway", perIp("pay-callback", 120), validate({ params: S.params.gateway, body: S.body.gatewayMessage }), h(paymentWeb.callback));
+// The bank's server-to-server message: only ICICI's addresses once they are configured (ICICI_CALLBACK_ALLOWED_IPS).
+router.post("/api/payments/callback/:gateway", ipAllowList(() => config.payment.icici.callbackAllowedIps, "payment callback"), perIp("pay-callback", 120), validate({ params: S.params.gateway, body: S.body.gatewayMessage }), h(paymentWeb.callback));
 router.get("/mockpay/:txn", paymentWeb.mockEnabled, validate({ params: S.params.txn }), h(paymentWeb.mockPage));
 router.post("/mockpay/:txn/complete", paymentWeb.mockEnabled, validate({ params: S.params.txn, body: S.body.mockPay }), h(paymentWeb.mockComplete));
 router.get("/invoice/:token", validate({ params: S.params.token }), h(invoice.show));

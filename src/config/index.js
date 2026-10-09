@@ -44,9 +44,13 @@ module.exports = {
       merchantId: process.env.ICICI_PG_MERCHANT_ID || "",
       aggregatorId: process.env.ICICI_PG_AGGREGATOR_ID || "",
       secretKey: process.env.ICICI_PG_SECRET_KEY || "",
+      // Source addresses (comma separated, CIDR allowed) of ICICI's Payment Advice webhook; empty = not restricted.
+      callbackAllowedIps: String(process.env.ICICI_CALLBACK_ALLOWED_IPS || "").split(",").map((s) => s.trim()).filter(Boolean),
     },
   },
   // Flipick video engine / VVP backend.
+  // Shared secret the video engine sends in X-Webhook-Secret on its callback; empty = the callback is accepted unsigned.
+  videoEngineWebhookSecret: process.env.VIDEO_ENGINE_WEBHOOK_SECRET || "",
   flipick: {
     baseUrl: process.env.FLIPICK_SPONSORED_ADS_BASE_URL,
     videoEngineBaseUrl: process.env.FLIPICK_VIDEO_ENGINE_BASE_URL,

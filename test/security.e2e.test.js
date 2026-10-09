@@ -62,6 +62,67 @@ describe("security hardening", () => {
     });
   });
 
+  // ---- H7: callbacks, replay, webhook secret ----
+  describe("H7 callbacks and webhooks", () => {
+    let config;
+    before(() => { config = require("../src/config"); });
+    const postJson = (p, body, headers = {}) => fetch(BASE() + p, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+    it("the ICICI callback is limited to the configured source addresses (and checks the signature either way)", async () => {
+      const saved = config.payment.icici.callbackAllowedIps;
+      try {
+        config.payment.icici.callbackAllowedIps = [];
+        const open = await postJson("/api/payments/callback/icici", { merchantTxnNo: "X", responseCode: "0000", secureHash: "0".repeat(64) });
+        assert.notEqual(open.status, 403, "no list configured: not restricted by address");
+        config.payment.icici.callbackAllowedIps = ["203.0.113.0/24", "198.51.100.7"];
+        const blocked = await postJson("/api/payments/callback/icici", { merchantTxnNo: "X", responseCode: "0000", secureHash: "0".repeat(64) });
+        assert.equal(blocked.status, 403, "this machine is not on the list");
+        config.payment.icici.callbackAllowedIps = ["203.0.113.0/24", "127.0.0.1"];
+        const allowed = await postJson("/api/payments/callback/icici", { merchantTxnNo: "X", responseCode: "0000", secureHash: "0".repeat(64) });
+        assert.notEqual(allowed.status, 403);
+        assert.equal(allowed.status, 400, "an allowed address still has to present a valid signature");
+      } finally { config.payment.icici.callbackAllowedIps = saved; }
+    });
+
+    it("replay: the same signed return message used again changes nothing (one invoice, one recorded message)", async () => {
+      const order = await call("POST", "/api/billing/checkout", { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" });
+      assert.equal(order.status, 201);
+      const txn = order.body.redirectUrl.match(/mockpay\/([^/?]+)/)[1];
+      const done = await fetch(`${BASE()}/mockpay/${txn}/complete`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "result=paid" });
+      const returnUrl = done.headers.get("location");
+      assert.match(returnUrl, /^\/billing\/return\?gw=mock/);
+      const first = await (await fetch(BASE() + returnUrl)).text();
+      assert.match(first, /Payment received/);
+      for (let i = 0; i < 3; i++) assert.match(await (await fetch(BASE() + returnUrl)).text(), /Payment received/);
+      const invoices = (await db.asSystem(() => db.query("SELECT count(*)::int AS n FROM invoices i JOIN payment_orders o ON o.id = i.order_id WHERE o.merchant_txn_no = $1", [txn]))).rows[0].n;
+      assert.equal(invoices, 1, "replays did not issue more invoices");
+      const events = (await db.asSystem(() => db.query("SELECT count(*)::int AS n FROM gateway_events e JOIN payment_orders o ON o.id = e.order_id WHERE o.merchant_txn_no = $1 AND e.event_key LIKE 'return:%'", [txn]))).rows[0].n;
+      assert.equal(events, 1, "the message was recorded once");
+    });
+
+    it("a tampered return message is rejected and does not touch the order", async () => {
+      const order = await call("POST", "/api/billing/checkout", { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" });
+      const txn = order.body.redirectUrl.match(/mockpay\/([^/?]+)/)[1];
+      const forged = await fetch(`${BASE()}/billing/return?gw=mock&txn=${txn}&status=paid&sig=${"0".repeat(64)}`);
+      assert.match(await forged.text(), /could not verify/i);
+      const status = (await db.asSystem(() => db.query("SELECT status FROM payment_orders WHERE merchant_txn_no = $1", [txn]))).rows[0].status;
+      assert.notEqual(status, "paid");
+    });
+
+    it("the video-engine webhook needs its shared secret when one is configured", async () => {
+      const saved = config.videoEngineWebhookSecret;
+      try {
+        config.videoEngineWebhookSecret = "engine-shared-secret";
+        const body = { project_id: "p-123", event: "edited" };
+        assert.equal((await postJson("/api/webhooks/video-engine", body)).status, 401);
+        assert.equal((await postJson("/api/webhooks/video-engine", body, { "X-Webhook-Secret": "wrong" })).status, 401);
+        assert.equal((await postJson("/api/webhooks/video-engine", body, { "X-Webhook-Secret": "engine-shared-secret" })).status, 200);
+        config.videoEngineWebhookSecret = "";
+        assert.equal((await postJson("/api/webhooks/video-engine", body)).status, 200, "no secret configured: accepted as before");
+      } finally { config.videoEngineWebhookSecret = saved; }
+    });
+  });
+
   // ---- H4: staff console sign-in ----
   describe("H4 staff console lock-out, two-factor, idle timeout, CSRF", () => {
     const { authenticator } = require("otplib");

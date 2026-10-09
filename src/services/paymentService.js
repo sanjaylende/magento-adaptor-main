@@ -176,6 +176,9 @@ async function handleReturn(gatewayName, params) {
     "INSERT INTO gateway_events (gateway, event_key, order_id, payload) VALUES ($1, $2, $3, $4) ON CONFLICT (gateway, event_key) DO NOTHING",
     [gateway.name, `return:${verified.merchantTxnNo}:${verified.status}:${verified.gatewayRef || ""}`, order.id, JSON.stringify(verified.raw || params)]
   ));
+  // A message for an order that is already settled (paid, failed, canceled, refunded) changes nothing: a replayed or repeated
+  // message is answered from our own record, without another call to the bank.
+  if (["paid", "failed", "canceled", "refunded", "partially_refunded"].includes(order.status)) return { order, duplicate: true };
   let result = await confirmWithGateway(order);
   // The bank's own signed return says "paid" but its status service can lag the redirect by a few seconds (seen on the ICICI
   // sandbox: P0030 right after a successful payment). Ask again briefly; otherwise the scheduled re-check settles it.

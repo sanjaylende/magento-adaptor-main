@@ -1,11 +1,18 @@
 // Flipick tells us when a project was edited in LTX Studio after generation: flag the slot stale instead of silently
 // serving an out-of-date video. The callback carries no tenant, so the owning store is found from the project id.
 const logger = require("../utils/logger");
+const config = require("../config");
+const { safeEqual } = require("../utils/crypto");
 const { withStore } = require("../db/connection");
 const generatedState = require("../services/generatedState");
 const videoVersions = require("../repositories/VideoVersionRepository");
 
 async function videoEngine(req, res) {
+  // When VIDEO_ENGINE_WEBHOOK_SECRET is set the engine must send it; anything else is refused before any work is done.
+  if (config.videoEngineWebhookSecret && !safeEqual(req.get("X-Webhook-Secret") || "", config.videoEngineWebhookSecret)) {
+    logger.warn("Video-engine webhook refused: wrong or missing secret", { ip: req.ip, requestId: req.id });
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   res.json({ ok: true });
   const { project_id: projectId, event } = req.body || {};
   if (!projectId || !event) return;
