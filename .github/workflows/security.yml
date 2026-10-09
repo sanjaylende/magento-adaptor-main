@@ -24,7 +24,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts        # install scripts of dependencies never run in CI
       - run: npm audit --omit=dev --audit-level=high
-      - run: npx --yes lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https
+      - run: npx --yes lockfile-lint@5.0.0 --path package-lock.json --type npm --allowed-hosts npm --validate-https
 
   dependency-review:
     name: Dependency review (new packages in a pull request)
