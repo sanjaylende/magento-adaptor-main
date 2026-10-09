@@ -1783,6 +1783,9 @@ function startGenerationMulti() {
 
 async function generatePreviewForCurrent() {
   const current = modal.queue[modal.queueIndex];
+  // The merchant can press "Skip preview, generate anyway" or Cancel while the stills are still loading; that closes (or
+  // replaces) the modal, and the late answer must then be ignored instead of writing into a modal that no longer exists.
+  const thisModal = modal;
   modal.step = "loading-preview";
   modal.previewError = null;
   renderModal();
@@ -1792,6 +1795,7 @@ async function generatePreviewForCurrent() {
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: current.videoType, prompt: current.prompt, aspectRatio: current.aspectRatio }),
     });
     const body = await res.json();
+    if (modal !== thisModal) return;
     if (!res.ok || body.error) throw new Error(body.error || "Could not generate preview images");
     modal.previewImages = body.images || [];
     // The server already persisted this as a 'candidates' version --
@@ -1809,6 +1813,7 @@ async function generatePreviewForCurrent() {
     // this gets the same generic, non-leaking treatment as a failed
     // generation (see renderDetailTabBody's row-error text).
     console.error("Preview image generation failed:", err.message);
+    if (modal !== thisModal) return;
     modal.previewError = "Couldn't generate preview options. Try again, or contact support if this keeps happening.";
     modal.step = "preview-error";
   }
