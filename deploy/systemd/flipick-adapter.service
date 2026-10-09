@@ -1,0 +1,71 @@
+# Hardened systemd unit for the Magento adapter. Install:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin flipick
+#   sudo install -d -o flipick -g flipick -m 750 /opt/flipick-adapter /var/log/flipick-adapter
+#   sudo cp flipick-adapter.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now flipick-adapter
+# Secrets live in /etc/flipick-adapter.env (root:root, mode 600), NOT inside the application folder: systemd reads it as root, the
+# application account cannot open the file itself.
+# Check the result with:  systemd-analyze security flipick-adapter.service
+[Unit]
+Description=Flipick Magento video adapter
+After=network-online.target postgresql.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=flipick
+Group=flipick
+WorkingDirectory=/opt/flipick-adapter/app
+EnvironmentFile=/etc/flipick-adapter.env
+Environment=NODE_ENV=production LOG_DIR=/var/log/flipick-adapter
+ExecStart=/usr/bin/node --use-system-ca server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# ---- what the process may see and do ----
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateUsers=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+PrivateMounts=true
+DeviceAllow=
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Node's JIT needs memory that is writable and executable, so MemoryDenyWriteExecute stays off (the one switch that cannot be on).
+MemoryDenyWriteExecute=false
+RemoveIPC=true
+UMask=0077
+# Only IPv4/IPv6 sockets and local Unix sockets (journal); nothing else.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+# The only writable place is the log folder. The code folder is read-only to the service.
+ReadWritePaths=/var/log/flipick-adapter
+ReadOnlyPaths=/opt/flipick-adapter
+# Network: the adapter must reach the database, the video engine, ICICI and every merchant's store (any public address), so no
+# IPAddressDeny is set here. Restrict inbound traffic with the firewall and nginx (see deploy/nginx and docs/security).
+
+# ---- limits ----
+LimitNOFILE=4096
+TasksMax=256
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
