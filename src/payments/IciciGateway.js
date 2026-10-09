@@ -18,8 +18,10 @@ const crypto = require("crypto");
 const logger = require("../utils/logger");
 const config = require("../config");
 const { hmacHex, safeEqual } = require("../utils/crypto");
+const { safeFetch } = require("../utils/safeFetch");
 
 const name = "icici";
+const ICICI_HOSTS = ["pgpay.icicibank.com", "pgpayuat.icicibank.com"]; // the only hosts this adapter will ever call for payments
 const cfg = () => config.payment.icici;
 const CURRENCY_CODE = { INR: "356", USD: "840" }; // ISO 4217 numeric
 
@@ -71,7 +73,7 @@ async function post(url, body) {
   const startedAt = Date.now();
   let res;
   try {
-    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+    res = await safeFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, { allowHosts: ICICI_HOSTS, maxRedirects: 0, maxBytes: 1024 * 1024, timeoutMs: 30000 });
   } catch (err) {
     // Never log the body: it carries the secure hash and customer details.
     logger.error("ICICI request failed", { path: new URL(url).pathname, ms: Date.now() - startedAt, error: err.message });

@@ -2,6 +2,7 @@
 // Authorization header, so the link carries a short-lived signed token instead.
 const { Readable } = require("stream");
 const logger = require("../utils/logger");
+const { safeFetch } = require("../utils/safeFetch");
 const { signToken, verifyToken } = require("../utils/crypto");
 const { runWithTenant } = require("../context");
 const tenants = require("../services/tenantService");
@@ -57,7 +58,7 @@ async function stream(req, res, claims) {
     return res.status(err.status || 502).json({ error: err.userMessage || "Couldn't refresh the expired video link — try again" });
   }
   try {
-    const videoRes = await fetch(fresh.videoUrl);
+    const videoRes = await safeFetch(fresh.videoUrl, {}, { timeoutMs: 10 * 60 * 1000, maxBytes: 500 * 1024 * 1024 });
     if (!videoRes.ok || !videoRes.body) throw new Error(`Fetching video for download failed (${videoRes.status})`);
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Content-Disposition", `attachment; filename="${downloadFilename(product, uniqueTag, videoType)}"`);

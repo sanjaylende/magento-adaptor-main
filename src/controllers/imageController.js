@@ -4,6 +4,7 @@
 // that came from a store's own catalogue can be fetched; nothing is taken from the request.
 const { Readable } = require("stream");
 const logger = require("../utils/logger");
+const { safeFetch } = require("../utils/safeFetch");
 const { signToken, verifyToken } = require("../utils/crypto");
 
 const TTL_SECONDS = 12 * 3600;
@@ -16,7 +17,7 @@ async function show(req, res) {
   const claims = verifyToken(req.params.token);
   if (!claims || claims.typ !== "img") return res.status(404).end();
   try {
-    const upstream = await fetch(claims.u, { signal: AbortSignal.timeout(20000) });
+    const upstream = await safeFetch(claims.u, {}, { timeoutMs: 20000, maxBytes: MAX_BYTES });
     const type = upstream.headers.get("content-type") || "";
     if (!upstream.ok || !upstream.body || !type.startsWith("image/")) return res.status(404).end();
     if (Number(upstream.headers.get("content-length") || 0) > MAX_BYTES) return res.status(413).end();

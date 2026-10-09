@@ -9,6 +9,7 @@
 // GraphQL client at all.
 
 const logger = require("../utils/logger");
+const { safeFetch } = require("../utils/safeFetch");
 
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 5;
@@ -37,7 +38,7 @@ async function magentoRequest(url, accessToken, { method = "GET", body, maxRetri
     const startedAt = Date.now();
     let res;
     try {
-      res = await fetch(url, {
+      res = await safeFetch(url, {
         method,
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -47,6 +48,11 @@ async function magentoRequest(url, accessToken, { method = "GET", body, maxRetri
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
+      // An address the adapter refuses to call (private network, plain http in production, ...) is a final answer, not a glitch.
+      if (err && (err.name === "OutboundError" || err.name === "BlockedAddressError" || (err.cause && err.cause.name === "BlockedAddressError"))) {
+        logger.warn(`Magento ${method} ${safeUrl} refused`, { reason: err.cause?.message || err.message });
+        throw new MagentoApiError(`Store address is not allowed: ${err.cause?.message || err.message}`, { status: 400, cause: err });
+      }
       // Network failure or timeout: safe to retry a read; a write may or may not have run, so it is reported instead.
       const timedOut = err && (err.name === "TimeoutError" || err.name === "AbortError");
       const willRetry = method === "GET" && attempt < maxRetries;

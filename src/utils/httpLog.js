@@ -1,6 +1,7 @@
 // fetch() with a timeout and one log line per call (method, host + path, status, duration; never the query string or headers).
 // A network failure or timeout is logged and rethrown with a message that says which service was being called.
 const logger = require("./logger");
+const { safeFetch, configuredServiceHosts } = require("./safeFetch");
 
 async function loggedFetch(service, url, options = {}) {
   const { timeoutMs = 60000, ...init } = options;
@@ -8,7 +9,7 @@ async function loggedFetch(service, url, options = {}) {
   const label = `${service} ${(init.method || "GET").toUpperCase()} ${target.host}${target.pathname}`;
   const startedAt = Date.now();
   try {
-    const res = await fetch(url, { ...init, signal: init.signal || AbortSignal.timeout(timeoutMs) });
+    const res = await safeFetch(url, { ...init, signal: init.signal || AbortSignal.timeout(timeoutMs) }, { allowHosts: configuredServiceHosts(), maxRedirects: 0, maxBytes: 50 * 1024 * 1024, timeoutMs });
     const ms = Date.now() - startedAt;
     if (res.status >= 500) logger.error(`${label} -> ${res.status}`, { ms });
     else if (res.status >= 400) logger.warn(`${label} -> ${res.status}`, { ms });

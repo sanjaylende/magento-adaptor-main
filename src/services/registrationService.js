@@ -1,9 +1,8 @@
 // Onboarding of a Magento installation: the extension presents a working Magento integration token, which proves the caller
 // controls that store; the adapter then reads the store's websites, creates the merchant/installation/stores and hands back
 // the install key and secret (shown once).
-const dns = require("dns").promises;
-const net = require("net");
 const config = require("../config");
+const { assertPublicHost: assertPublicHostName } = require("../utils/netGuard");
 const tenants = require("./tenantService");
 const { magentoRequest } = require("../integrations/magentoClient");
 
@@ -20,17 +19,17 @@ function normaliseBaseUrl(raw) {
   return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
 }
 
-const isPrivateAddress = (ip) =>
-  net.isIP(ip) === 4
-    ? /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(ip)
-    : /^(::1$|fc|fd|fe80)/i.test(ip);
-
-// In production the adapter must not be usable to probe internal networks (the store URL is caller-supplied).
+// In production the adapter must not be usable to probe internal networks (the store URL is caller-supplied), and a store's
+// access token must never travel over plain http. Every later call to the store is checked again by safeFetch.
 async function assertPublicHost(baseUrl) {
   if (!config.isProduction) return;
-  const { hostname } = new URL(baseUrl);
-  const addresses = net.isIP(hostname) ? [{ address: hostname }] : await dns.lookup(hostname, { all: true });
-  if (addresses.some((a) => isPrivateAddress(a.address))) throw httpError(400, "Store URL must be publicly reachable");
+  const url = new URL(baseUrl);
+  if (url.protocol !== "https:") throw httpError(400, "Store URL must use https");
+  try {
+    await assertPublicHostName(url.hostname);
+  } catch (err) {
+    throw httpError(400, "Store URL must be publicly reachable");
+  }
 }
 
 // Websites of the store with their base currency, read with the merchant's own token.
