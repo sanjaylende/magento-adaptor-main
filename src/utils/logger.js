@@ -16,20 +16,31 @@ const { RotatingFile } = require("./logRotation");
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 const threshold = LEVELS[String(process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug")).toLowerCase()] || LEVELS.info;
-const asJson = String(process.env.LOG_FORMAT || "text").toLowerCase() === "json";
-const SENSITIVE = /(secret|token|password|authorization|signature|api_?key|credential|consumer_?key)/i;
+// JSON lines by default in production (a log shipper can parse them); readable text elsewhere.
+const asJson = String(process.env.LOG_FORMAT || (process.env.NODE_ENV === "production" ? "json" : "text")).toLowerCase() === "json";
+// Field names whose values never reach a log: credentials, and personal or payment data (e-mail, phone, address, GST number, card data).
+const SENSITIVE = /(secret|token|password|passwd|authorization|signature|api_?key|credential|consumer_?key|cookie|session|secure_?hash|otp|cvv|card|e-?mail|phone|mobile|address|gst|launch)/i;
+
+// Text scrubbing: whatever ends up inside a message or an error text (a URL, a library's error, a response body) is cleaned too.
+function scrub(text) {
+  return String(text)
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [redacted]")   // first, so "Authorization: Bearer xyz" keeps nothing of xyz
+    .replace(/(consumer_(?:key|secret)=)[^&\s"']+/gi, "$1[redacted]")
+    .replace(/((?:access_?token|api_?key|token|secret|password|signature|secure_?hash|authorization)["']?\s*[=:]\s*["']?)(?!\[redacted\]|Bearer \[redacted\])[^&\s"',}]+/gi, "$1[redacted]")
+    .replace(/\b(fk_[A-Za-z0-9_-]{4})[A-Za-z0-9_-]{6,}/g, "$1[redacted]")                       // install keys
+    .replace(/([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, "$1***@$2"); // e-mail addresses
+}
 
 function redact(value, depth = 0) {
   if (value == null || depth > 4) return value;
-  if (value instanceof Error) return { name: value.name, message: value.message, status: value.status, code: value.code, stack: value.stack };
+  if (value instanceof Error) return { name: value.name, message: scrub(value.message), status: value.status, code: value.code, stack: scrub(value.stack || "") };
   if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1));
   if (typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = SENSITIVE.test(k) ? "[redacted]" : redact(v, depth + 1);
+    for (const [k, v] of Object.entries(value)) out[k] = /^installKey$/i.test(k) && typeof v === "string" ? scrub(v) : SENSITIVE.test(k) ? "[redacted]" : redact(v, depth + 1);
     return out;
   }
-  // Credentials embedded in a URL query string must never reach a log.
-  return typeof value === "string" ? value.replace(/(consumer_(?:key|secret)=)[^&\s]+/gi, "$1[redacted]") : value;
+  return typeof value === "string" ? scrub(value) : value;
 }
 
 // ---- file sinks (created on first use; a failure to write a file never breaks the application)
@@ -79,7 +90,7 @@ function write(level, args) {
   const hasContext = args.length > 1 && last && typeof last === "object" && !(last instanceof Error) && !Array.isArray(last);
   const context = hasContext ? redact(last) : undefined;
   const parts = (hasContext ? args.slice(0, -1) : args).map((a) => (a instanceof Error ? a.stack || a.message : typeof a === "object" ? JSON.stringify(redact(a)) : String(a)));
-  const message = parts.join(" ").replace(/(consumer_(?:key|secret)=)[^&\s]+/gi, "$1[redacted]");
+  const message = scrub(parts.join(" "));
   const time = new Date().toISOString();
   const sink = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
   const line = asJson ? JSON.stringify({ time, level, message, ...(context ? { context } : {}) }) : `${time} ${level}: ${message}${context ? ` ${JSON.stringify(context)}` : ""}`;

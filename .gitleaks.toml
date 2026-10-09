@@ -9,4 +9,5 @@ regexes = [
 ]
 paths = [
   '''package-lock\.json''',
+  '''test/logs\.e2e\.test\.js''',   # deliberately fake secrets that the test feeds to the logger to prove they are masked
 ]
