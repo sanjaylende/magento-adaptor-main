@@ -19,7 +19,14 @@ async function frameAncestors() {
 }
 
 async function index(req, res) {
-  res.set("Content-Security-Policy", `frame-ancestors ${await frameAncestors()}`);
+  // Own scripts and styles only (the UI uses inline event handlers, hence 'unsafe-inline' for scripts); product images and
+  // videos may come from the store or the video engine over http(s). Framed only by registered Magento admins.
+  res.set("Content-Security-Policy", [
+    "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https: http:", "media-src 'self' blob: https: http:", "font-src 'self' data:",
+    "connect-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
+    `frame-ancestors ${await frameAncestors()}`,
+  ].join("; "));
   res.set("Cache-Control", "no-store");
   res.send(template);
 }

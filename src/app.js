@@ -18,7 +18,9 @@ const { assertSafeConfig } = require("./config/safety");
 function createApp() {
   const app = express();
   app.set("trust proxy", config.isProduction ? 1 : false);
+  app.disable("x-powered-by");
   app.use(requestLog);
+  app.use(require("./middleware/securityHeaders"));
   // rawBody is kept for request signatures and idempotency hashes.
   app.use(express.json({ limit: "1mb", verify: (req, res, buf) => { req.rawBody = buf.toString("utf8"); } }));
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));
