@@ -62,6 +62,30 @@ describe("security hardening", () => {
     });
   });
 
+  // ---- M4: request limits ----
+  describe("M4 request and connection limits", () => {
+    it("the HTTP server has header, request and keep-alive limits", () => {
+      const server = require("../src/app").createServer();
+      assert.equal(server.headersTimeout, 15000);
+      assert.equal(server.requestTimeout, 30000);
+      assert.equal(server.keepAliveTimeout, 5000);
+    });
+
+    it("a body above the route's own limit is answered 413 (session 4 KB, checkout 2 KB, generate 128 KB), above 1 MB by the parser", async () => {
+      const big = (n) => ({ launch: "x".repeat(n) });
+      assert.equal((await h.api("POST", "/api/session", { body: big(10 * 1024) })).status, 413);
+      assert.equal((await call("POST", "/api/billing/checkout", { currency: "USD", kind: "plan", tier: "x".repeat(3000) })).status, 413);
+      assert.equal((await call("POST", "/api/generate", { uniqueTag: "magento-1-novariant", videoType: "hero_product", prompt: "x".repeat(200 * 1024) })).status, 413);
+      const huge = await h.api("POST", "/api/session", { body: big(2 * 1024 * 1024) });
+      assert.equal(huge.status, 413);
+    });
+
+    it("oversized request headers are refused", async () => {
+      const res = await fetch(BASE() + "/api/bootstrap", { headers: { "X-Padding": "a".repeat(40 * 1024) } }).catch((err) => ({ status: 0, error: err }));
+      assert.ok(res.status === 431 || res.status === 0, `expected 431 or a closed connection, got ${res.status}`);
+    });
+  });
+
   // ---- H7: callbacks, replay, webhook secret ----
   describe("H7 callbacks and webhooks", () => {
     let config;

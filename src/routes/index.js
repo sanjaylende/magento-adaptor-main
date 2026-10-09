@@ -19,7 +19,7 @@ const invoice = require("../controllers/invoiceController");
 const asyncHandler = require("../middleware/asyncHandler");
 const tenantAuth = require("../middleware/tenantAuth");
 const idempotent = require("../middleware/idempotency");
-const { validate, idempotencyKeyShape } = require("../middleware/validate");
+const { validate, idempotencyKeyShape, limitBody } = require("../middleware/validate");
 const { perIp, perInstallation, perStore } = require("../middleware/rateLimit");
 const { ipAllowList } = require("../middleware/ipAllowList");
 const config = require("../config");
@@ -31,18 +31,18 @@ const h = asyncHandler;
 
 // ---- Public: the UI shell, onboarding, sessions, payment pages, signed links, webhooks ----
 router.get("/", h(page.index));
-router.post("/api/v1/register", perIp("register", 10), validate({ body: S.body.register }), h(installation.register));
-router.post("/api/session", perIp("session", 60), validate({ body: S.body.session }), h(session.exchange));
+router.post("/api/v1/register", perIp("register", 10), limitBody(8 * 1024), validate({ body: S.body.register }), h(installation.register));
+router.post("/api/session", perIp("session", 60), limitBody(4 * 1024), validate({ body: S.body.session }), h(session.exchange));
 router.get("/billing/return", perIp("pay-return", 60), validate({ query: S.query.paymentReturn }), h(paymentWeb.returnPage));
-router.post("/billing/return", perIp("pay-return", 60), validate({ query: S.query.paymentReturn, body: S.body.gatewayMessage }), h(paymentWeb.returnPage));
+router.post("/billing/return", perIp("pay-return", 60), limitBody(16 * 1024), validate({ query: S.query.paymentReturn, body: S.body.gatewayMessage }), h(paymentWeb.returnPage));
 // The bank's server-to-server message: only ICICI's addresses once they are configured (ICICI_CALLBACK_ALLOWED_IPS).
-router.post("/api/payments/callback/:gateway", ipAllowList(() => config.payment.icici.callbackAllowedIps, "payment callback"), perIp("pay-callback", 120), validate({ params: S.params.gateway, body: S.body.gatewayMessage }), h(paymentWeb.callback));
+router.post("/api/payments/callback/:gateway", ipAllowList(() => config.payment.icici.callbackAllowedIps, "payment callback"), perIp("pay-callback", 120), limitBody(16 * 1024), validate({ params: S.params.gateway, body: S.body.gatewayMessage }), h(paymentWeb.callback));
 router.get("/mockpay/:txn", paymentWeb.mockEnabled, validate({ params: S.params.txn }), h(paymentWeb.mockPage));
 router.post("/mockpay/:txn/complete", paymentWeb.mockEnabled, validate({ params: S.params.txn, body: S.body.mockPay }), h(paymentWeb.mockComplete));
 router.get("/invoice/:token", validate({ params: S.params.token }), h(invoice.show));
 router.get("/dl/:token", validate({ params: S.params.token }), h(download.download));
 router.get("/img/:token", perIp("img", 600), validate({ params: S.params.token }), h(image.show));
-router.post("/api/webhooks/video-engine", perIp("engine-webhook", 300), validate({ body: S.body.videoEngineWebhook }), h(webhook.videoEngine));
+router.post("/api/webhooks/video-engine", perIp("engine-webhook", 300), limitBody(16 * 1024), validate({ body: S.body.videoEngineWebhook }), h(webhook.videoEngine));
 
 // ---- Extension, server to server (signed): no store needed ----
 const signedOnly = [tenantAuth({ requireStore: false }), perInstallation(300)];
@@ -60,14 +60,14 @@ forStore.get("/bootstrap", h(bootstrap.bootstrap));
 forStore.get("/products", validate({ query: S.query.products }), h(catalog.list));
 forStore.post("/refresh", perStore("refresh", 6), validate({ body: S.body.emptyish }), catalog.refresh);
 forStore.get("/product-attributes/:uniqueTag", validate({ params: S.params.tag }), catalog.productAttributes);
-forStore.post("/prompt-default", validate({ body: S.body.tagAndType }), catalog.promptDefault);
+forStore.post("/prompt-default", limitBody(2 * 1024), validate({ body: S.body.tagAndType }), catalog.promptDefault);
 
 forStore.get("/overlay-families", validate({ query: S.query.overlayFamilies }), overlay.families);
 forStore.get("/overlay-families/:name/preview", expensive, validate({ params: S.params.overlayName, query: S.query.overlayPreview }), overlay.preview);
 
-forStore.post("/preview-images", expensive, idempotent(), validate({ body: S.body.previewImages }), generation.previewImages);
-forStore.post("/generate", expensive, idempotent(), validate({ body: S.body.generate }), h(generation.generate));
-forStore.post("/update-overlay", expensive, idempotent(), validate({ body: S.body.updateOverlay }), generation.updateOverlay);
+forStore.post("/preview-images", expensive, limitBody(16 * 1024), idempotent(), validate({ body: S.body.previewImages }), generation.previewImages);
+forStore.post("/generate", expensive, limitBody(128 * 1024), idempotent(), validate({ body: S.body.generate }), h(generation.generate));
+forStore.post("/update-overlay", expensive, limitBody(128 * 1024), idempotent(), validate({ body: S.body.updateOverlay }), generation.updateOverlay);
 forStore.get("/status/:uniqueTag/:videoType", validate({ params: S.params.tagType }), generation.status);
 forStore.post("/generated/:uniqueTag/:videoType/cancel", validate({ params: S.params.tagType, body: S.body.emptyish }), generation.cancel);
 
@@ -81,7 +81,7 @@ forStore.post("/generated/:uniqueTag/:videoType/push-to-magento", validate({ par
 forStore.get("/generated/:uniqueTag/:videoType/download-link", validate({ params: S.params.tagType, query: S.query.versionQuery }), download.link);
 
 forStore.get("/billing/status", h(billing.status));
-forStore.post("/billing/checkout", idempotent(), validate({ body: S.body.checkout }), h(billing.checkout));
+forStore.post("/billing/checkout", limitBody(2 * 1024), idempotent(), validate({ body: S.body.checkout }), h(billing.checkout));
 forStore.get("/billing/orders/:id", validate({ params: S.params.id }), h(billing.orderStatus));
 forStore.post("/billing/cancel", validate({ body: S.body.emptyish }), h(billing.cancel));
 forStore.get("/billing/history", h(billing.history));

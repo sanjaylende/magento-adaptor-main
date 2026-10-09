@@ -36,4 +36,14 @@ function idempotencyKeyShape(req, res, next) {
   next();
 }
 
-module.exports = { validate, idempotencyKeyShape };
+// Per-route cap on the request body (the global parser allows 1 MB; most routes need a few hundred bytes).
+function limitBody(maxBytes) {
+  return (req, res, next) => {
+    if (Buffer.byteLength(req.rawBody || "", "utf8") > maxBytes) {
+      return res.status(413).json({ error: "Request body is too large", requestId: req.id });
+    }
+    next();
+  };
+}
+
+module.exports = { validate, idempotencyKeyShape, limitBody };

@@ -1,4 +1,5 @@
 // Express application assembly + boot sequence (migrations -> EAV definitions -> sweep -> jobs -> HTTP listener).
+const http = require("http");
 const path = require("path");
 const express = require("express");
 const config = require("./config");
@@ -31,6 +32,17 @@ function createApp() {
   return app;
 }
 
+// The HTTP server with its connection limits (M4): a client has 15 s to send its headers and 30 s to send a whole request, headers
+// are capped at 16 KB, and idle keep-alive connections are closed after 5 s (shorter than nginx's, so nginx never reuses a dead one).
+function createServer(app = createApp()) {
+  const server = http.createServer({ maxHeaderSize: 16 * 1024 }, app);
+  server.headersTimeout = 15 * 1000;
+  server.requestTimeout = 30 * 1000;
+  server.keepAliveTimeout = 5 * 1000;
+  server.maxRequestsPerSocket = 1000;
+  return server;
+}
+
 async function start() {
   // Last-resort safety nets: a synchronous throw that escaped every try/catch means Node's state can't be trusted --
   // log and exit so a supervisor restarts us; a stray rejection is only logged.
@@ -48,9 +60,9 @@ async function start() {
   await adminUsers.ensureBootstrapAdmin();
   await videoVersions.sweepAfterRestart();
   scheduler.start();
-  createApp().listen(config.port, () => {
+  createServer().listen(config.port, () => {
     logger.info(`Magento adapter running at ${config.publicBaseUrl} (payment gateway: ${config.payment.gateway})`);
   });
 }
 
-module.exports = { createApp, start };
+module.exports = { createApp, createServer, start };
