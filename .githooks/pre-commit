@@ -1,0 +1,12 @@
+#!/bin/sh
+# Blocks a commit that adds a secret (API keys, passwords, tokens). Install once per clone: sh scripts/install-hooks.sh
+# Uses a local gitleaks binary when present, otherwise the official Docker image. Bypass only for a verified false positive:
+#   add the finding to .gitleaks.toml (allowlist), never use --no-verify.
+if command -v gitleaks >/dev/null 2>&1; then
+  exec gitleaks protect --staged --redact --no-banner -c .gitleaks.toml
+elif command -v docker >/dev/null 2>&1; then
+  export MSYS_NO_PATHCONV=1; exec docker run --rm -v "$(pwd):/repo" zricethezav/gitleaks:latest protect --staged --redact --no-banner --source /repo -c /repo/.gitleaks.toml
+else
+  echo "pre-commit: neither gitleaks nor docker is installed, so this commit was NOT scanned for secrets." >&2
+  exit 1
+fi
