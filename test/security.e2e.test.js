@@ -59,10 +59,10 @@ describe("security hardening", () => {
     it("/.well-known/security.txt says where to report a problem and when the file expires", async () => {
       const res = await get("/.well-known/security.txt");
       assert.equal(res.status, 200);
-      assert.match(res.headers.get("content-type"), /text/plain/);
+      assert.ok(res.headers.get("content-type").startsWith("text/plain"));
       const body = await res.text();
-      assert.match(body, /^Contact: (mailto:|https://)/m);
-      assert.match(body, /^Expires: d{4}-d{2}-d{2}T/m);
+      assert.match(body, /^Contact: (mailto:|https:)/m);
+      assert.match(body, /^Expires: [0-9]{4}-[0-9]{2}-[0-9]{2}T/m);
     });
 
     it("API and staff pages are never cached", async () => {
