@@ -26,7 +26,8 @@ async function bootstrap(req, res) {
     // Photos go through /img so they load whatever scheme or host Magento serves them from; imageSource keeps the real URL.
     products: productService.list().map((p) => ({ ...p, imageSource: p.image, image: proxiedImageUrl(p.image), images: (p.images || []).map(proxiedImageUrl) })),
     generated: generatedState.all(),
-    storeUrl: `${installation.baseUrl} · ${store.name}`,
+    // Shown under "Select products": only the website name (the store address is not useful to the merchant).
+    storeUrl: store.name,
     syncedAt: productService.syncedAt(),
     billing: await billing.snapshot(merchant && merchant.country_code),
   });
