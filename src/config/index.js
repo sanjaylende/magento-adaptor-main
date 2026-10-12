@@ -58,7 +58,6 @@ module.exports = {
     videoEngineBaseUrl: process.env.FLIPICK_VIDEO_ENGINE_BASE_URL,
     videoEngineApiKey: process.env.FLIPICK_VIDEO_ENGINE_API_KEY,
     vvpApiKey: process.env.FLIPICK_VVP_API_KEY,
-    sponsoredApiKey: process.env.FLIPICK_SPONSORED_ADS_API_KEY,
     tenantId: process.env.FLIPICK_TENANT_ID,
     retailerName: process.env.RETAILER_NAME,
   },
