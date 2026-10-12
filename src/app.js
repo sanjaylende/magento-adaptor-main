@@ -56,14 +56,14 @@ async function start() {
     logger.error("Unhandled promise rejection:", reason);
   });
 
-  assertSafeConfig(); // production only: refuses the mock gateway, plain-HTTP address, development passwords
+  assertSafeConfig(); // production only: refuses the ICICI test (UAT) address, plain-HTTP address, development passwords
   await runMigrations();
   await syncEntityTypes([VideoSlot, VideoVersion, StoreSetting]);
   await adminUsers.ensureBootstrapAdmin();
   await videoVersions.sweepAfterRestart();
   scheduler.start();
   createServer().listen(config.port, () => {
-    logger.info(`Magento adapter running at ${config.publicBaseUrl} (payment gateway: ${config.payment.gateway})`);
+    logger.info(`Magento adapter running at ${config.publicBaseUrl} (payment gateway: ICICI)`);
   });
 }
 

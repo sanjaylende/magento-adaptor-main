@@ -35,7 +35,7 @@ describe("security hardening", () => {
     const get = (path, opts) => fetch(BASE() + path, { redirect: "manual", ...opts });
 
     it("every response hides the framework and sets nosniff, referrer and permissions policies", async () => {
-      for (const path of ["/", "/admin/login", "/static/css/app.css", "/api/bootstrap", "/billing/return?gw=mock"]) {
+      for (const path of ["/", "/admin/login", "/static/css/app.css", "/api/bootstrap", "/billing/return?gw=icici"]) {
         const res = await get(path);
         assert.equal(res.headers.get("x-powered-by"), null, path);
         assert.equal(res.headers.get("x-content-type-options"), "nosniff", path);
@@ -49,7 +49,7 @@ describe("security hardening", () => {
       assert.match(shell, /frame-ancestors 'self' http:\/\/127\.0\.0\.1:45124/);
       assert.match(shell, /object-src 'none'/);
       assert.equal((await get("/")).headers.get("x-frame-options"), null);
-      for (const path of ["/admin/login", "/api/bootstrap", "/billing/return?gw=mock"]) {
+      for (const path of ["/admin/login", "/api/bootstrap", "/billing/return?gw=icici"]) {
         const res = await get(path);
         assert.match(res.headers.get("content-security-policy"), /frame-ancestors 'none'/, path);
         assert.equal(res.headers.get("x-frame-options"), "DENY", path);
@@ -206,13 +206,13 @@ describe("security hardening", () => {
     it("replay: the same signed return message used again changes nothing (one invoice, one recorded message)", async () => {
       const order = await call("POST", "/api/billing/checkout", { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" });
       assert.equal(order.status, 201);
-      const txn = order.body.redirectUrl.match(/mockpay\/([^/?]+)/)[1];
-      const done = await fetch(`${BASE()}/mockpay/${txn}/complete`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "result=paid" });
-      const returnUrl = done.headers.get("location");
-      assert.match(returnUrl, /^\/billing\/return\?gw=mock/);
-      const first = await (await fetch(BASE() + returnUrl)).text();
+      const txn = new URL(order.body.redirectUrl).searchParams.get("tranCtx");
+      h.icici.setResult(txn, "paid");
+      const signedForm = new URLSearchParams(h.icici.returnForm(txn, "paid"));
+      const returnOnce = () => fetch(`${BASE()}/billing/return?gw=icici`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: signedForm }).then((r) => r.text());
+      const first = await returnOnce();
       assert.match(first, /Payment received/);
-      for (let i = 0; i < 3; i++) assert.match(await (await fetch(BASE() + returnUrl)).text(), /Payment received/);
+      for (let i = 0; i < 3; i++) assert.match(await returnOnce(), /Payment received/);
       const invoices = (await db.asSystem(() => db.query("SELECT count(*)::int AS n FROM invoices i JOIN payment_orders o ON o.id = i.order_id WHERE o.merchant_txn_no = $1", [txn]))).rows[0].n;
       assert.equal(invoices, 1, "replays did not issue more invoices");
       const events = (await db.asSystem(() => db.query("SELECT count(*)::int AS n FROM gateway_events e JOIN payment_orders o ON o.id = e.order_id WHERE o.merchant_txn_no = $1 AND e.event_key LIKE 'return:%'", [txn]))).rows[0].n;
@@ -221,8 +221,8 @@ describe("security hardening", () => {
 
     it("a tampered return message is rejected and does not touch the order", async () => {
       const order = await call("POST", "/api/billing/checkout", { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" });
-      const txn = order.body.redirectUrl.match(/mockpay\/([^/?]+)/)[1];
-      const forged = await fetch(`${BASE()}/billing/return?gw=mock&txn=${txn}&status=paid&sig=${"0".repeat(64)}`);
+      const txn = new URL(order.body.redirectUrl).searchParams.get("tranCtx");
+      const forged = await fetch(`${BASE()}/billing/return?gw=icici`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ merchantTxnNo: txn, responseCode: "0000", secureHash: "0".repeat(64) }) });
       assert.match(await forged.text(), /could not verify/i);
       const status = (await db.asSystem(() => db.query("SELECT status FROM payment_orders WHERE merchant_txn_no = $1", [txn]))).rows[0].status;
       assert.notEqual(status, "paid");

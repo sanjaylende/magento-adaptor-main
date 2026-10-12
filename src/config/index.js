@@ -40,7 +40,6 @@ module.exports = {
     inrPerUsd: Number(process.env.INR_PER_USD || 83), // PLACEHOLDER rate for INR top-up packs; set the real one before launch
   },
   payment: {
-    gateway: process.env.PAYMENT_GATEWAY || "mock", // mock | icici
     icici: {
       baseUrl: process.env.ICICI_PG_BASE_URL || "https://pgpayuat.icicibank.com",
       merchantId: process.env.ICICI_PG_MERCHANT_ID || "",

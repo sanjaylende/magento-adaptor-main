@@ -139,9 +139,8 @@ describe("input validation", () => {
       ok(await h.api("POST", "/api/webhooks/video-engine", { body: { project_id: "p-1", event: "edited", extra_from_engine: 1 } }));
     });
 
-    it("mock gateway routes only accept known results and references", async () => {
-      bad(await h.api("GET", "/mockpay/x"), "reference too short");
-      bad(await h.api("POST", "/mockpay/FLTESTREF01/complete", { body: { result: "hacked" } }), "unknown result");
+    it("the payment return address only accepts the ICICI gateway name", async () => {
+      bad(await h.api("GET", "/billing/return?gw=other"), "unknown gateway name");
     });
   });
 

@@ -7,7 +7,7 @@ invoices. UI and billing behaviour follow the Shopify adapter (`../shopify-adapt
 ```
 Magento admin (extension)  --signed HTTPS-->  this adapter  --> Flipick video engine (LTX)
         |  grid + launch links                  |   PostgreSQL (EAV + billing tables)
-        '-- iframe: one-time launch token -----'   --> payment gateway (ICICI / mock)
+        '-- iframe: one-time launch token -----'   --> payment gateway (ICICI)
                                                   --> staff console at /admin
 ```
 
@@ -73,7 +73,7 @@ Ported from the Shopify adapter and made data-driven (`plans`, `plan_prices`, `p
 ## Payments
 
 `src/payments/` holds the gateways behind one interface (`createPayment`, `verifyReturn`, `checkStatus`, `refund`).
-`PAYMENT_GATEWAY=mock` runs the whole flow without a bank (a hosted test page at `/mockpay/...`).
+The automated tests use a fake ICICI bank (`test/fakeIcici.js`) so no network or bank account is needed.
 
 Rules: a plan or credit is granted only after the gateway's own **status check** says paid for exactly the order amount; every
 gateway result is stored once (`gateway_events` unique key), so duplicate or late callbacks change nothing; pending orders are
@@ -90,7 +90,7 @@ To go live on ICICI:
 1. Get UAT credentials and the API document from ICICI (merchant id, aggregator id, secret key, status and refund calls,
    test cards, callback URL registration). Ask about international cards and settlement currency.
 2. Implement `checkStatus` and `refund`, confirm field names / date format / response codes, add tests for them.
-3. Set `PAYMENT_GATEWAY=icici`, the `ICICI_PG_*` values and `ICICI_PG_SPEC_CONFIRMED=true`; register
+3. Set the `ICICI_PG_*` values and `ICICI_PG_SPEC_CONFIRMED=true`; register
    `PUBLIC_BASE_URL/api/payments/callback/icici` as the callback and `PUBLIC_BASE_URL/billing/return?gw=icici` as the return URL.
 4. Run the scenarios in `test/platform.e2e.test.js` against UAT by hand: pay, decline, pending then paid, duplicate callback, refund.
 
@@ -100,7 +100,7 @@ To go live on ICICI:
 server.js, src/app.js        entry and assembly
 src/routes, controllers      HTTP
 src/services                 billing rules/metering, payments, tenants, registration, scheduler
-src/payments                 gateways (mock, icici)
+src/payments                 gateway (icici)
 src/repositories, models     video history on EAV (video_slot, video_version, store_setting)
 src/db                       connection + tenant context, migrations runner, generic EAV repository
 src/middleware               tenant auth (signature / session), rate limit, idempotency

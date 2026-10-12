@@ -1,4 +1,4 @@
-// Start-up safety checks for production. A misconfigured production server (test payment gateway, plain-HTTP public address,
+// Start-up safety checks for production. A misconfigured production server (ICICI test address, plain-HTTP public address,
 // development database passwords) is refused at boot, so it can never serve traffic by accident.
 // Returns the list of problems; start() refuses to run when the list is not empty.
 function productionProblems(env = process.env) {
@@ -6,9 +6,6 @@ function productionProblems(env = process.env) {
   const problems = [];
   const publicUrl = String(env.PUBLIC_BASE_URL || "");
 
-  if (String(env.PAYMENT_GATEWAY || "mock") === "mock") {
-    problems.push("PAYMENT_GATEWAY=mock is not allowed in production: the mock gateway lets anyone mark an order as paid. Set PAYMENT_GATEWAY=icici.");
-  }
   if (!/^[0-9a-f]{64}$/i.test(String(env.ADAPTER_SECRET_KEY || ""))) {
     problems.push("ADAPTER_SECRET_KEY must be 64 hex characters (32 random bytes).");
   }
@@ -28,13 +25,11 @@ function productionProblems(env = process.env) {
   if (env.ADMIN_BOOTSTRAP_PASSWORD && String(env.ADMIN_BOOTSTRAP_PASSWORD).length < 12) {
     problems.push("ADMIN_BOOTSTRAP_PASSWORD is shorter than 12 characters.");
   }
-  if (String(env.PAYMENT_GATEWAY) === "icici") {
-    for (const name of ["ICICI_PG_MERCHANT_ID", "ICICI_PG_AGGREGATOR_ID", "ICICI_PG_SECRET_KEY"]) {
-      if (!env[name]) problems.push(`${name} must be set when PAYMENT_GATEWAY=icici.`);
-    }
-    if (/pgpayuat/i.test(String(env.ICICI_PG_BASE_URL || "https://pgpayuat.icicibank.com"))) {
-      problems.push("ICICI_PG_BASE_URL points at the ICICI test (UAT) environment; use https://pgpay.icicibank.com in production.");
-    }
+  for (const name of ["ICICI_PG_MERCHANT_ID", "ICICI_PG_AGGREGATOR_ID", "ICICI_PG_SECRET_KEY"]) {
+    if (!env[name]) problems.push(`${name} must be set in production.`);
+  }
+  if (/pgpayuat/i.test(String(env.ICICI_PG_BASE_URL || "https://pgpayuat.icicibank.com"))) {
+    problems.push("ICICI_PG_BASE_URL points at the ICICI test (UAT) environment; use https://pgpay.icicibank.com in production.");
   }
   return problems;
 }

@@ -9,6 +9,9 @@ const DB_NAME = "magento_adapter_test";
 const OWNER = "postgresql://adapter_owner:adapter_owner_local@127.0.0.1:5434";
 
 async function resetDatabase() {
+  // Payments go to a pretend ICICI bank, never to the real sandbox (see test/fakeIcici.js). Installed here, before the app is loaded,
+  // so the app's own settings (log level and so on) are not read too early.
+  if (!module.exports.icici) module.exports.icici = require("./fakeIcici").install();
   const admin = new Client({ connectionString: `${OWNER}/postgres` });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)`);
@@ -23,7 +26,7 @@ function useTestEnvironment() {
     ADAPTER_SECRET_KEY: "11".repeat(32),
     PORT: String(ADAPTER_PORT),
     PUBLIC_BASE_URL: `http://127.0.0.1:${ADAPTER_PORT}`,
-    PAYMENT_GATEWAY: "mock",
+    ...require("./fakeIcici").ENV,
     ADMIN_BOOTSTRAP_EMAIL: "staff@test.local",
     ADMIN_BOOTSTRAP_PASSWORD: "staff-password-1",
     BILLING_GRACE_DAYS: "3",

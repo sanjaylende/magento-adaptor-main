@@ -1,4 +1,4 @@
-// Tiny server-side HTML helpers for the few pages this service renders itself (payment return, mock gateway, invoices).
+// Tiny server-side HTML helpers for the few pages this service renders itself (payment return, invoices).
 const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const CURRENCY_SYMBOL = { USD: "$", INR: "₹" };

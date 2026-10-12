@@ -245,13 +245,10 @@ describe("platform", () => {
     });
   });
 
-  describe("plans, payments and metering (mock gateway)", () => {
+  describe("plans, payments and metering (fake ICICI bank)", () => {
     const pay = async (token, redirectUrl, result) => {
-      const txn = redirectUrl.split("/mockpay/")[1];
-      const done = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/mockpay/${txn}/complete`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `result=${result}`, redirect: "manual" });
-      assert.equal(done.status, 303);
-      const back = await fetch(new URL(done.headers.get("location"), `http://127.0.0.1:${h.ADAPTER_PORT}`));
-      return { page: await back.text(), returnUrl: done.headers.get("location") };
+      const txn = new URL(redirectUrl).searchParams.get("tranCtx");
+      return { page: await h.icici.pay(`http://127.0.0.1:${h.ADAPTER_PORT}`, txn, result), txn };
     };
     let orderUsd, subA1;
 
@@ -291,9 +288,10 @@ describe("platform", () => {
       const hist = await h.api("GET", "/api/billing/history", { token: sessionA1 });
       const order = hist.body.orders.find((o) => o.id === orderUsd);
       const txn = order.merchantTxnNo;
-      const sig = require("../src/payments/MockGateway").sign(txn, "paid");
-      await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/billing/return?gw=mock&txn=${txn}&status=paid&sig=${sig}`);
-      await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/billing/return?gw=mock&txn=${txn}&status=paid&sig=${sig}`);
+      const form = new URLSearchParams(h.icici.returnForm(txn, "paid"));
+      const repost = () => fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/billing/return?gw=icici`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form });
+      await repost();
+      await repost();
       const after = await h.api("GET", "/api/billing/history", { token: sessionA1 });
       assert.equal(after.body.orders.find((o) => o.id === orderUsd).invoices.length, 1);
       const { rows } = await db.asSystem(() => db.query("SELECT count(*)::int AS n FROM invoices WHERE order_id = $1", [orderUsd]));
@@ -301,7 +299,8 @@ describe("platform", () => {
     });
 
     it("a forged return signature is rejected", async () => {
-      const res = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/billing/return?gw=mock&txn=ANY&status=paid&sig=${"0".repeat(64)}`);
+      const forged = new URLSearchParams({ merchantTxnNo: "ANY", responseCode: "0000", secureHash: "0".repeat(64) });
+      const res = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/billing/return?gw=icici`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: forged });
       assert.match(await res.text(), /could not verify/i);
     });
 
@@ -350,10 +349,10 @@ describe("platform", () => {
 
     it("a payment left pending is picked up later by reconciliation once the bank confirms", async () => {
       const made = await h.api("POST", "/api/billing/checkout", { token: sessionA2, body: { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" } });
-      await pay(sessionA2, made.body.redirectUrl, "pending");
+      const { txn } = await pay(sessionA2, made.body.redirectUrl, "pending");
       assert.equal((await h.api("GET", `/api/billing/orders/${made.body.orderId}`, { token: sessionA2 })).body.status, "pending");
-      // The bank confirms later: the mock records the outcome, then the poll (or the scheduled job) applies it.
-      await db.asSystem(() => db.query("INSERT INTO payment_attempts (order_id, status, response) VALUES ($1, 'mock_paid', '{}')", [made.body.orderId]));
+      // The bank confirms later; the poll (or the scheduled job) then applies it.
+      h.icici.setResult(txn, "paid");
       assert.equal((await h.api("GET", `/api/billing/orders/${made.body.orderId}`, { token: sessionA2 })).body.status, "paid");
       assert.equal((await h.api("GET", "/api/billing/status", { token: sessionA2 })).body.currentPlan, "starter");
     });
@@ -388,6 +387,7 @@ describe("platform", () => {
     it("refunds a plan payment: credit note issued, order marked refunded, plan ended", async () => {
       const { rows: [order] } = await db.asSystem(() => db.query("SELECT * FROM payment_orders WHERE id = $1", [orderUsd]));
       await payments.refundOrder({ orderId: orderUsd, amountMinor: order.total_minor, reason: "Customer request", entitlementAction: "cancel_plan", actor: { type: "staff", id: "t@test" } });
+      await payments.settleProcessingRefunds(); // ICICI accepts a refund first; its final answer is read afterwards
       const after = await h.api("GET", "/api/billing/history", { token: sessionA1 });
       const o = after.body.orders.find((x) => x.id === orderUsd);
       assert.equal(o.status, "refunded");
@@ -401,6 +401,7 @@ describe("platform", () => {
       await pay(sessionB1, made.body.redirectUrl, "paid");
       await assert.rejects(() => payments.refundOrder({ orderId: made.body.orderId, amountMinor: 1001, reason: "too much", actor: { type: "staff", id: "t@test" } }), /more than what was paid/);
       await payments.refundOrder({ orderId: made.body.orderId, amountMinor: 400, reason: "partial", entitlementAction: "remove_credit", actor: { type: "staff", id: "t@test" } });
+      await payments.settleProcessingRefunds(); // ICICI accepts a refund first; its final answer is read afterwards
       const st = await h.api("GET", "/api/billing/status", { token: sessionB1 });
       assert.equal(st.body.creditCents, 600);
     });
@@ -418,8 +419,7 @@ describe("platform", () => {
   describe("cancel plan", () => {
     it("drops the store back to the free plan at once, keeping used free videos and credit, and cannot be repeated", async () => {
       const made = await h.api("POST", "/api/billing/checkout", { token: sessionB1, body: { kind: "plan", tier: "starter", cycle: "monthly", currency: "USD" } });
-      const txn = made.body.redirectUrl.split("/mockpay/")[1];
-      await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/mockpay/${txn}/complete`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "result=paid", redirect: "manual" });
+      await h.icici.pay(`http://127.0.0.1:${h.ADAPTER_PORT}`, new URL(made.body.redirectUrl).searchParams.get("tranCtx"), "paid");
       assert.equal((await h.api("GET", `/api/billing/orders/${made.body.orderId}`, { token: sessionB1 })).body.status, "paid");
       const before = (await h.api("GET", "/api/billing/status", { token: sessionB1 })).body;
       assert.equal(before.currentPlan, "starter");

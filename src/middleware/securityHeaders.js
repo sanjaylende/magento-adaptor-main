@@ -5,7 +5,7 @@
 //   /api/*       JSON only: a CSP that allows nothing, never framed, never cached.
 //   /admin/*     Staff console: strict CSP (own styles, no scripts), never framed (X-Frame-Options DENY + frame-ancestors 'none'),
 //                never cached.
-//   Plain pages rendered by the service (payment result, invoice, mock gateway): minimal CSP, never framed.
+//   Plain pages rendered by the service (payment result, invoice): minimal CSP, never framed.
 //   The UI shell ("/") sets its own CSP in pageController because it MUST be framed, but only by registered Magento admins.
 //   /static/*    Public assets: nosniff only.
 const helmet = require("helmet");
@@ -34,7 +34,7 @@ function area(path) {
   if (path.startsWith("/api/payments/callback")) return "api";
   if (path.startsWith("/admin")) return "admin";
   if (path.startsWith("/dl/") || path.startsWith("/img/")) return "binary";
-  return "page"; // /billing/return, /invoice/*, /mockpay/*
+  return "page"; // /billing/return, /invoice/*
 }
 
 function securityHeaders(req, res, next) {
