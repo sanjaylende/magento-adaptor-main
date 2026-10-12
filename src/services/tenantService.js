@@ -149,13 +149,7 @@ async function getStoreSettings(storeId) {
   return entity ? entity.values : {};
 }
 
-async function saveStoreSettings(storeId, values) {
-  const entity = await eav.findOne(StoreSetting.entityType, { storeId });
-  if (entity) await eav.update(StoreSetting.entityType, entity.id, values);
-  else await eav.create(StoreSetting.entityType, values, { storeId });
-}
-
 module.exports = {
   httpError, getInstallationByKey, getInstallation, getStore, getStoreById, listStores, syncStores,
-  registerInstallation, touchInstallation, markUninstalled, magentoConfigFor, getStoreSettings, saveStoreSettings,
+  registerInstallation, touchInstallation, markUninstalled, magentoConfigFor, getStoreSettings,
 };

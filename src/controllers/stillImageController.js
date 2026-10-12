@@ -9,7 +9,7 @@
 const config = require("../config");
 const logger = require("../utils/logger");
 const { tenant } = require("../context");
-const { query, asSystem, currentStoreId } = require("../db/connection");
+const { query, asSystem } = require("../db/connection");
 const { signToken, verifyToken } = require("../utils/crypto");
 const productService = require("../services/productService");
 const { proxiedImageUrl } = require("./imageController");

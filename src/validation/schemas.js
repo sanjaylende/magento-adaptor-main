@@ -19,7 +19,6 @@ const versionId = z.union([z.string().regex(/^[A-Za-z0-9-]{1,64}$/), z.number().
 const aspectRatio = blankToUndefined(z.enum(ASPECT_RATIOS));
 const signedToken = z.string().regex(/^[A-Za-z0-9_.-]{10,4096}$/, "invalid token");
 const gateway = z.enum(["icici"]);
-const entityId = z.string().regex(/^[A-Za-z0-9-]{1,64}$/, "invalid id");
 const variableMap = z.record(text(100, 1), z.union([text(2000), z.number().transform(String)])).refine((o) => Object.keys(o).length <= 60, "too many fields");
 const selectionMap = z.record(text(100, 1), text(200)).refine((o) => Object.keys(o).length <= 60, "too many fields");
 

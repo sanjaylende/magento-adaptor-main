@@ -1906,11 +1906,6 @@ function isImageTransitionCurrent() {
   return !!current && current.videoType === "image_transition";
 }
 
-function isHeroProductCurrent() {
-  const current = modal.queue[modal.queueIndex];
-  return !!current && current.videoType === "hero_product";
-}
-
 // The queue/selections machinery below supports more than one item --
 // the preview-picker step is identical either way, walking one type at
 // a time regardless of how many are queued. This single-type path

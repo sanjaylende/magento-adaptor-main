@@ -83,11 +83,6 @@ async function listVersions(uniqueTag, videoType) {
   return (await slotVersions(slot)).sort(byNewest).map((v) => VideoVersion.toDto(v, slot));
 }
 
-async function getVersion(versionId) {
-  const loaded = await loadVersion(versionId);
-  return loaded ? VideoVersion.toDto(loaded.version, loaded.slot) : null;
-}
-
 // Webhook lookup: the engine's callback carries no tenant, so this searches every store and returns the DTO with its
 // storeId, letting the caller continue inside withStore(storeId).
 async function findVersionByProjectId(projectId) {
@@ -200,34 +195,11 @@ async function loadGenerated() {
   return generated;
 }
 
-// Imports a pre-multi-tenant JSON store (data/videoStore.json) into the given store. Returns the number of versions.
-async function importVersionStore(targetStoreId, state) {
-  return withStore(targetStoreId, () => tx(async () => {
-    const idMap = new Map(); // old version id -> new entity id
-    let count = 0;
-    for (const v of (state.versions || []).sort((a, b) => a.versionNo - b.versionNo)) {
-      const slot = await getOrCreateSlot(v.uniqueTag, v.videoType);
-      const id = await eav.create(VERSION, { ...VideoVersion.pick(v, VideoVersion.ALLOCATABLE), versionNo: v.versionNo }, { storeId: targetStoreId, parentId: slot.id });
-      await query("UPDATE eav_entity SET created_at = $2, updated_at = $3 WHERE entity_id = $1", [id, v.createdAt || now(), v.updatedAt || now()]);
-      idMap.set(v.id, id);
-      count++;
-    }
-    for (const [key, oldId] of Object.entries(state.current || {})) {
-      const sep = key.lastIndexOf("::");
-      const slot = await findSlot(key.slice(0, sep), key.slice(sep + 2));
-      if (slot && idMap.has(oldId)) await eav.update(SLOT, slot.id, { currentVersionId: idMap.get(oldId) });
-    }
-    logger.info(`Imported ${count} video version(s) from the pre-multi-tenant store`);
-    return count;
-  }));
-}
-
 module.exports = {
   loadGenerated,
   allocateVersion,
   updateVersionAndMirror,
   listVersions,
-  getVersion,
   findVersionByProjectId,
   setCurrentVersion,
   deleteVersion,
@@ -235,5 +207,4 @@ module.exports = {
   cancelVersion,
   sweepAfterRestart,
   remapUniqueTag,
-  importVersionStore,
 };

@@ -129,14 +129,6 @@ async function fetchAttributeMetadata(baseUrl, accessToken, attributeCode, optio
   return magentoRequest(url, accessToken, options); // { attribute_code, frontend_input, options: [...], ... }
 }
 
-// Some attribute metadata responses already embed `options` (see above) --
-// this is kept as its own call for callers that only have the attribute code
-// and want the label list without the rest of the metadata payload.
-async function fetchAttributeOptions(baseUrl, accessToken, attributeCode, options = {}) {
-  const url = `${baseUrl}/rest/V1/products/attributes/${encodeURIComponent(attributeCode)}/options`;
-  return magentoRequest(url, accessToken, options); // [{ label, value }]
-}
-
 // Writes one or more custom attributes on a product by SKU. Magento merges
 // custom_attributes by attribute_code on save -- this can push just the 1-2
 // attributes this app cares about without first fetching and re-sending the
@@ -158,6 +150,5 @@ module.exports = {
   fetchConfigurableChildren,
   fetchProductBySku,
   fetchAttributeMetadata,
-  fetchAttributeOptions,
   updateProductAttributes,
 };

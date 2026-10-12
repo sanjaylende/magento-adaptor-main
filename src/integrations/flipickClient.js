@@ -5,7 +5,6 @@
 // circular-importer's Express app / Postgres DB.
 
 const VVP_ENDPOINT = "/api/v1/vvp-generation/generate";
-const SPONSORED_ENDPOINT = "/api/v1/sponsored-ads/projects";
 
 // The target project ("base video") is resolved-or-created by Flipick, keyed
 // on (tenant, theme, category, name): the first call for a given triple
@@ -75,45 +74,6 @@ async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayF
   return body; // { tenant_id, project_id, base_video_action, variant_id, variant_action, video_url, thumbnail_url, warnings }
 }
 
-// Single-product, single-shot Veo generation (synchronous, 30-90s). No
-// per-batch cap is enforced here — circular-importer's MAX_SPONSORED_PER_SCAN
-// was a curation rule for that app's UI, not a Flipick API constraint; if
-// this project needs the same discipline, the caller should gate which
-// products it routes through generateVideos({ mode: "sponsored" }).
-async function generateSponsoredVideo({ baseUrl, apiKey, tenantId, product, retailer, includeVo }) {
-  if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
-  if (!tenantId) throw new Error("tenantId is required");
-  if (!retailer || !retailer.name) throw new Error("retailer.name is required");
-
-  const payload = {
-    source_app: "magento",
-    project: { tenant_id: tenantId },
-    product: {
-      unique_tag: product.uniqueTag,
-      name: product.name,
-      price: product.price,
-      mrp: product.offer ? product.offer.originalPrice : undefined,
-      image: { image_data: product.image },
-    },
-    retailer: {
-      name: retailer.name,
-      logo: retailer.logoUrl ? { image_data: retailer.logoUrl } : undefined,
-    },
-    video_spec: { aspect_ratio: "16:9", duration_secs: 8, include_vo: !!includeVo },
-  };
-
-  const res = await loggedFetch("flipick", `${baseUrl}${SPONSORED_ENDPOINT}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(`Sponsored Ads API failed (${res.status}): ${body.error || JSON.stringify(body)}`);
-  }
-  return body; // { project_id, shot_id, preview_url, warnings, ... }
-}
-
 // Deletes VVP base-video project(s) on Flipick's side -- called whenever our
 // own record of a video is deleted, so it doesn't linger there as an orphan.
 // Best-effort by design: a failure here shouldn't block the caller's own
@@ -138,4 +98,4 @@ async function deleteVvpVideos({ baseUrl, apiKey, tenantId, projectIds, variantI
   return body; // { results: [{ project_id, status, gcs_files_removed? }] }
 }
 
-module.exports = { generateVvpVideo, generateSponsoredVideo, deleteVvpVideos };
+module.exports = { generateVvpVideo, deleteVvpVideos };

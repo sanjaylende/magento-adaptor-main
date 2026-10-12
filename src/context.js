@@ -16,6 +16,4 @@ function tenant() {
   return t;
 }
 
-const hasTenant = () => !!als.getStore();
-
-module.exports = { runWithTenant, tenant, hasTenant };
+module.exports = { runWithTenant, tenant };

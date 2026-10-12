@@ -95,12 +95,6 @@ async function confirmEnrollment(userId, code) {
   return true;
 }
 
-// Lost phone: an operator with database or server access turns two-factor off for one account (scripts/reset-2fa.js).
-async function resetTotp(email) {
-  const r = await asSystem(() => query("UPDATE admin_users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = 0, failed_attempts = 0, locked_until = NULL WHERE lower(email) = lower($1)", [email]));
-  return r.rowCount;
-}
-
 // Creates the first admin from ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD when there are no staff accounts yet.
 async function ensureBootstrapAdmin() {
   const { bootstrapEmail, bootstrapPassword } = config.admin;
@@ -114,4 +108,4 @@ async function ensureBootstrapAdmin() {
   logger.info(`Created first staff admin ${bootstrapEmail}`);
 }
 
-module.exports = { login, getById, ensureBootstrapAdmin, hashPassword, verifyTotp, beginEnrollment, confirmEnrollment, resetTotp };
+module.exports = { login, getById, ensureBootstrapAdmin, hashPassword, verifyTotp, beginEnrollment, confirmEnrollment };

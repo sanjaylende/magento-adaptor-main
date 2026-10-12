@@ -73,7 +73,4 @@ function taxFor({ subtotalMinor, currency, countryCode, gstRateBp }) {
   return { rateBp, taxMinor, totalMinor: subtotalMinor + taxMinor };
 }
 
-// Number of videos a budget covers at the cheapest rate; shown as "up to N videos" on plan cards.
-const approxVideos = (budget, cheapestRate) => Math.floor(budget / cheapestRate);
-
-module.exports = { GATE, videoCostCents, budgetCents, effectiveStatus, checkAllowed, fundingFor, nextPeriodEnd, taxFor, approxVideos };
+module.exports = { GATE, videoCostCents, budgetCents, effectiveStatus, checkAllowed, fundingFor, nextPeriodEnd, taxFor };

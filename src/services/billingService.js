@@ -1,7 +1,7 @@
 // Per-store subscription state, usage metering and credits, on top of the pure rules in billingRules.js.
 const config = require("../config");
 const logger = require("../utils/logger");
-const { query, tx, asSystem, currentStoreId } = require("../db/connection");
+const { query, tx, currentStoreId } = require("../db/connection");
 const rules = require("./billingRules");
 const audit = require("./auditService");
 
