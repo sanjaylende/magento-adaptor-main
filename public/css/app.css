@@ -124,9 +124,13 @@ s { color: #a8a69e; margin-left: 4px; }
 /* Generate Video modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: #fff; border-radius: 12px; width: 480px; max-width: 92vw; max-height: 88vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+/* Image Transitions' stills picker needs room for a 4-wide photo grid --
+   same precedent as .plan-modal below (a per-flow width override, not a
+   change to the base .modal every other step still uses). */
+.modal.wide { width: 720px; }
 .modal-header { padding: 18px 22px 4px; font-size: 17px; font-weight: 600; }
 .modal-body { padding: 10px 22px 4px; }
-.modal-actions { padding: 14px 22px 18px; display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions { padding: 14px 22px 18px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: #5f5e5a; margin-bottom: 4px; }
 .field select, .field textarea {
@@ -216,13 +220,45 @@ s { color: #a8a69e; margin-left: 4px; }
 }
 .plan-error { color: #b00020; font-size: 12.5px; margin: 0 22px 10px; }
 .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
-.preview-tile { border: 1px solid #e5e4de; border-radius: 8px; padding: 0; overflow: hidden; cursor: pointer; background: none; }
+/* Image Transitions' stills picker (product-photos row + generated-stills
+   row, see productImagesGridHtml/generatedImagesSectionHtml) -- 4 across
+   instead of 2; Hero Product's 2-column grid above is untouched. */
+.preview-grid.wide { grid-template-columns: repeat(4, 1fr); }
+.preview-tile { position: relative; border: 1px solid #e5e4de; border-radius: 8px; padding: 0; overflow: hidden; cursor: pointer; background: none; }
 .preview-tile:hover { border-color: #534ab7; }
 .preview-tile img { width: 100%; aspect-ratio: 1/1; object-fit: cover; display: block; }
-/* Image Transitions' picking step: all 4 stills are used, none
-   individually clickable -- no pointer/hover affordance. */
-.preview-tile.static { cursor: default; }
-.preview-tile.static:hover { border-color: #e5e4de; }
+.preview-tile.selected { border-color: #534ab7; box-shadow: 0 0 0 3px #534ab7; }
+.preview-tile[draggable="true"] { cursor: grab; }
+.still-badge {
+  position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%;
+  background: #534ab7; color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+/* "Change Image" -- real tiles only (stillTileHtml only renders this
+   overlay when tile.source === "real"), hover-revealed. Content is
+   anchored to the BOTTOM, not vertically centered -- a plain click/tap
+   anywhere near the tile's center (the natural "select this tile" spot)
+   must still land on the dark background and bubble up to the tile's
+   own onclick (toggleStillSelection), not get swallowed by the Change
+   Image button sitting dead-center on top of it. */
+.tile-overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.45); color: #fff;
+  display: none; flex-direction: column; align-items: center; justify-content: flex-end;
+  gap: 4px; padding-bottom: 10px; font-size: 11px; text-align: center;
+}
+.preview-tile[data-source="real"]:hover .tile-overlay { display: flex; }
+.tile-overlay-btn {
+  border: none; background: rgba(255,255,255,0.9); color: #333; border-radius: 6px;
+  width: 28px; height: 28px; font-size: 14px; cursor: pointer;
+}
+/* Change Image's "pick another of this product's photos" panel -- a
+   small scrollable strip of thumbnails inside the same tile-overlay. */
+.tile-overlay-picker { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; max-height: 60px; overflow-y: auto; width: 100%; }
+.tile-overlay-pick { border: 1px solid rgba(255,255,255,0.6); border-radius: 4px; padding: 0; width: 28px; height: 28px; overflow: hidden; cursor: pointer; background: none; flex: none; }
+.tile-overlay-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A just-uploaded tile before its real image exists yet -- no <img> at
+   all (there's nothing to show), just a placeholder box + spinner. */
+.uploading-tile { display: flex; align-items: center; justify-content: center; aspect-ratio: 1/1; background: #f1efe8; cursor: default; }
 .muted { color: #888780; font-size: 13px; }
 
 /* Video preview popup — mirrors circular-importer's VideoPreviewDialogComponent:

@@ -41,7 +41,20 @@ function findCustomAttribute(product, code) {
 // attribute (if set and lower) is the actual discounted selling price --
 // opposite of Shopify's variant.price (current) vs compare_at_price
 // (original).
-function normalizeProduct(product, child, { category, mediaBaseUrl, currencyCode }) {
+// One entry per configurable child (all of them, not just the first one that supplies the product's own price): { id, title, price,
+// compareAtPrice }, with the same price semantics as the product itself (special_price is the selling price, price the regular one).
+// Only used to offer one Price / MRP pair per variant in the overlay Variables picker.
+function variantsFrom(children) {
+  return (children || []).map((c) => {
+    const regular = c.price != null ? Number(c.price) : null;
+    const specialRaw = findCustomAttribute(c, "special_price");
+    const special = specialRaw != null && specialRaw !== "" ? Number(specialRaw) : null;
+    const onSpecial = special != null && regular != null && special < regular;
+    return { id: c.id, title: c.name || c.sku || `Variant ${c.id}`, price: onSpecial ? special : regular, compareAtPrice: onSpecial ? regular : null };
+  });
+}
+
+function normalizeProduct(product, child, { category, mediaBaseUrl, currencyCode, children }) {
   const priceSource = child || product;
   const regularPrice = priceSource.price != null ? Number(priceSource.price) : null;
   const specialRaw = findCustomAttribute(priceSource, "special_price");
@@ -50,6 +63,7 @@ function normalizeProduct(product, child, { category, mediaBaseUrl, currencyCode
 
   return {
     uniqueTag: `magento-${product.id}-${child?.id ?? "novariant"}`,
+    variants: variantsFrom(children),
     magentoSku: product.sku,
     name: product.name,
     category: category || DEFAULT_CATEGORY,
@@ -94,8 +108,8 @@ async function normalizeProducts(magentoProducts, resolveProduct, { currencyCode
 
   const normalized = [];
   for (const product of eligible) {
-    const { child, category, mediaBaseUrl } = await resolveProduct(product);
-    normalized.push(normalizeProduct(product, child, { category, mediaBaseUrl, currencyCode }));
+    const { child, children, category, mediaBaseUrl } = await resolveProduct(product);
+    normalized.push(normalizeProduct(product, child, { category, mediaBaseUrl, currencyCode, children }));
   }
   return normalized.filter((p) => p.price != null);
 }

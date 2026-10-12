@@ -11,7 +11,7 @@ const { tx, query, currentStoreId, asSystem, withStore } = require("../db/connec
 const logger = require("../utils/logger");
 const VideoSlot = require("../models/VideoSlot");
 const VideoVersion = require("../models/VideoVersion");
-const { STATUS, PREVIEW_STATUSES } = require("../config/constants");
+const { STATUS, PREVIEW_STATUSES, VIDEO_TYPES } = require("../config/constants");
 
 const VERSION = VideoVersion.entityType;
 const SLOT = VideoSlot.entityType;
@@ -158,6 +158,24 @@ async function cancelVersion(uniqueTag, videoType, versionId) {
 }
 
 // Boot sweep across every store: renders in flight when the process died can never finish, and previews expire.
+// A product's uniqueTag can change (e.g. the variant that supplies its price changes). Moves each of the old tag's slots to the new tag,
+// so the videos made for the product survive instead of appearing to vanish. A video type that already has a slot under the new tag
+// is left alone: that newer video is the one to keep. Returns the video types that were moved.
+async function remapUniqueTag(oldTag, newTag) {
+  if (!oldTag || !newTag || oldTag === newTag) return [];
+  const moved = [];
+  await tx(async () => {
+    for (const videoType of Object.keys(VIDEO_TYPES)) {
+      const old = await findSlot(oldTag, videoType);
+      if (!old) continue;
+      if (await findSlot(newTag, videoType)) continue;
+      await eav.update(SLOT, old.id, { uniqueTag: newTag });
+      moved.push(videoType);
+    }
+  });
+  return moved;
+}
+
 async function sweepAfterRestart() {
   await asSystem(async () => {
     for (const v of await eav.findAll(VERSION, { where: { status: STATUS.GENERATING } })) {
@@ -216,5 +234,6 @@ module.exports = {
   deleteSlot,
   cancelVersion,
   sweepAfterRestart,
+  remapUniqueTag,
   importVersionStore,
 };

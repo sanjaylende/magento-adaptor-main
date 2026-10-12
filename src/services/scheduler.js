@@ -50,6 +50,7 @@ async function housekeeping() {
     await query("DELETE FROM request_nonces WHERE expires_at < now()");
     await query("DELETE FROM rate_limits WHERE window_start < now() - interval '1 hour'");
     await query("DELETE FROM idempotency_keys WHERE created_at < now() - interval '48 hours'");
+    await query("DELETE FROM uploaded_images WHERE created_at < now() - interval '8 days'");
   });
 }
 

@@ -191,6 +191,24 @@ async function getCategoryDefault({ baseUrl, apiKey, category }) {
   return body; // { category_matched, suggested_prompt, vo_tone_default }
 }
 
+// Lifestyle only: the REAL prompt Lifestyle generation would use (built by the engine's own buildProductVideoPrompt with no creative
+// brief yet), not a disconnected placeholder. Whatever this returns, when submitted for real generation (edited or not) must be
+// sent with prompt_is_final, or the engine wraps it a second time.
+async function getLifestyleDefaultPrompt({ baseUrl, apiKey, category, productName, brandId }) {
+  if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
+  if (!productName) throw new Error("productName is required");
+  const params = new URLSearchParams({ category: category || "General", product_name: productName, video_type: "lifestyle" });
+  if (brandId) params.set("brand_id", brandId);
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/default-prompt?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`Fetching Lifestyle default prompt failed (${res.status}): ${body.error || JSON.stringify(body)}`);
+  }
+  return body.prompt || "";
+}
+
 // Generates 4 candidate starting-frame images to pick from before committing
 // to the real (expensive) Veo render -- synchronous, no job/poll needed. Both
 // video types now composite the real product photo in when one is available
@@ -346,4 +364,4 @@ function isVideoUrlStale(url) {
   return !expiresAt || expiresAt.getTime() - Date.now() < SIGNED_URL_STALE_BUFFER_MS;
 }
 
-module.exports = { generateHeroProductVideo, generateImageTransitionVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled, getCategoryDefault, generatePreviewImages, listOverlayFamilies, getOverlayFamilyPreview, refreshProjectVideoUrls, isVideoUrlStale };
+module.exports = { generateHeroProductVideo, generateImageTransitionVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled, getCategoryDefault, getLifestyleDefaultPrompt, generatePreviewImages, listOverlayFamilies, getOverlayFamilyPreview, refreshProjectVideoUrls, isVideoUrlStale };

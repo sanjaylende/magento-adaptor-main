@@ -1169,6 +1169,11 @@ function startPolling(tag, videoType, onSettled) {
 
 let modal = null;
 const FULL_TYPE_LABELS = { hero_product: "Hero Product", lifestyle: "Lifestyle", image_transition: "Image Transitions" };
+const TYPE_HINTS = {
+  hero_product: "Uses this product's own photo as a locked reference image — always renders fresh, no reuse.",
+  lifestyle: "Overrides the category's default theme for this video only — also uses this product's photo, when it has one.",
+  image_transition: "A single 8s clip assembled from 4 stills of this product (no AI video call) — next you'll see and confirm all 4 before generating.",
+};
 
 function defaultAspectRatio() { return "16:9"; }
 
@@ -1189,9 +1194,16 @@ async function openModal(tag, preselectType, quickGenerate) {
   // player) -- switch the main preview to that slot right away, so it
   // shows this slot's progress/result instead of whatever was selected
   // before (previously stuck wherever it last was, e.g. Hero Product,
-  // even after generating/updating a completely different slot).
-  if (preselectType && view.mode === "detail" && view.tag === tag) {
-    navigate({ selectedType: preselectType, expandedType: preselectType });
+  // even after generating/updating a completely different slot). Also
+  // switch to the Videos tab -- the sidebar's own per-slot Generate/
+  // Regenerate buttons (and "Generate another video") stay visible on
+  // every tab, so clicking one from Overview/product media previously
+  // left the merchant staring at that same tab with no visible sign
+  // anything was happening.
+  if (view.mode === "detail" && view.tag === tag) {
+    navigate(preselectType
+      ? { tab: "videos", selectedType: preselectType, expandedType: preselectType }
+      : { tab: "videos" });
   }
   const product = PRODUCTS.find((p) => p.uniqueTag === tag);
   modal = {
@@ -1211,9 +1223,9 @@ async function openModal(tag, preselectType, quickGenerate) {
     // -- the two never coexist in one modal instance.
     videoType: null,
     videoTypes: [],
-    promptByType: {}, loadingDefaultByType: {},
+    promptByType: {}, loadingDefaultByType: {}, promptErrorByType: {},
     aspectRatio: defaultAspectRatio(),
-    prompt: "", loadingDefault: false,
+    prompt: "", loadingDefault: false, promptError: null,
     overlayFamily: "", overlayFamilies: [], loadingOverlayFamilies: false,
     overlayPreviewUrl: null, loadingOverlayPreview: false,
     // Flipick has no API that exposes which overlay tokens a template
@@ -1247,6 +1259,25 @@ async function openModal(tag, preselectType, quickGenerate) {
     selections: [],
     previewImages: [],
     previewError: null,
+    // The combined real-photo + AI stills picker (see
+    // enterStillsSelection/generateStillsBatch) -- shared by Image
+    // Transitions (pick exactly 4, ordered) and Hero Product (pick at
+    // most 1, unordered); unused by Lifestyle, which stays on
+    // previewImages/previewError above. maxSelect (set by
+    // enterStillsSelection per videoType) is what the rest of this step
+    // branches its selection/drag/badge/confirm behavior on.
+    pool: [],
+    selectedIds: [],
+    maxSelect: 4,
+    loadingPool: false,
+    poolError: null,
+    generatingStills: false,
+    uploadingNewTile: false,
+    // Which tile's "pick another of this product's photos" panel is
+    // open (see onChangeImageClick) -- at most one at a time.
+    changeImageTileId: null,
+    otherRealImages: [],
+    loadingOtherImages: false,
   };
   loadAttributeOptions();
   if (preselectType) await selectVideoType(preselectType);
@@ -1300,6 +1331,11 @@ async function openUpdateOverlayModal(tag, videoType) {
     animation: "",
     queue: [], queueIndex: 0, selections: [],
     previewImages: [], previewError: null,
+    // Shape-consistency only -- update-overlay never reaches
+    // modal.step === "selecting-stills" (see openModal's own comment).
+    pool: [], selectedIds: [], maxSelect: 4, loadingPool: false, poolError: null,
+    generatingStills: false, uploadingNewTile: false,
+    changeImageTileId: null, otherRealImages: [], loadingOtherImages: false,
   };
   renderModal();
   // Awaited (unlike openModal's fire-and-forget call) -- applyDynamicVariableFields()
@@ -1328,7 +1364,7 @@ async function loadAttributeOptions() {
     modal.attributeOptions = [];
   }
   modal.loadingAttributeOptions = false;
-  renderModal();
+  renderModalPreservingPrompt();
 }
 
 // Picks (or switches) which type this modal instance is for -- seeds
@@ -1344,9 +1380,19 @@ async function selectVideoType(videoType) {
   modal.variableRows = [{ key: "v1", value: "", customMode: true }];
   modal.variablesTouched = false;
   modal.dynamicVariableOptions = [];
-  modal.prompt = ""; modal.animation = "";
+  modal.animation = "";
   renderModal();
-  await refillPromptDefault();
+  // Regenerating an existing slot should start from the prompt that
+  // actually produced its current video, not the generic category
+  // default -- only fall back to refillPromptDefault() when there's
+  // nothing to reuse yet (first-time generate for this slot).
+  if (existing && existing.prompt) {
+    modal.prompt = existing.prompt;
+    renderModal();
+  } else {
+    modal.prompt = "";
+    await refillPromptDefault();
+  }
   await loadModalOverlayFamilies();
 }
 
@@ -1367,7 +1413,18 @@ async function onVideoTypeToggle(type) {
     modal.videoTypes.push(type);
     renderModal();
     if (isFirst) await loadModalOverlayFamilies();
-    if (modal.promptByType[type] === undefined) await loadPromptDefaultFor(type);
+    if (modal.promptByType[type] === undefined) {
+      // Same reasoning as selectVideoType's single-type path: an
+      // already-generated slot should default to its own real prompt,
+      // not the generic category default.
+      const existing = generated[genKey(modal.tag, type)];
+      if (existing && existing.prompt) {
+        modal.promptByType[type] = existing.prompt;
+        renderModal();
+      } else {
+        await loadPromptDefaultFor(type);
+      }
+    }
   } else {
     modal.videoTypes.splice(index, 1);
     renderModal();
@@ -1376,19 +1433,22 @@ async function onVideoTypeToggle(type) {
 
 async function loadPromptDefaultFor(type) {
   modal.loadingDefaultByType[type] = true;
+  modal.promptErrorByType[type] = null;
   renderModal();
   try {
     const res = await fetch(apiUrl("/api/prompt-default"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: type }),
     });
-    const body = await res.json();
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Couldn't load the default prompt (" + res.status + ")");
     modal.promptByType[type] = body.prompt || "";
-  } catch {
+  } catch (err) {
     modal.promptByType[type] = modal.promptByType[type] || "";
+    modal.promptErrorByType[type] = err.message;
   }
   modal.loadingDefaultByType[type] = false;
-  renderModal();
+  enablePromptFieldInPlace("promptFieldRoot-" + type, modal.promptByType[type] || "", TYPE_HINTS[type], !!modal.promptErrorByType[type]) || renderModal();
 }
 
 function onPromptByTypeChange(type, value) {
@@ -1407,7 +1467,7 @@ function onPromptByTypeChange(type, value) {
 // explicitly, starting from "(none)".
 async function loadModalOverlayFamilies() {
   modal.loadingOverlayFamilies = true;
-  renderModal();
+  renderModalPreservingPrompt();
   try {
     // apiUrl(), not a raw path -- same multi-shop bug class as
     // loadAttributeOptions above: a raw path resolves against whichever
@@ -1431,7 +1491,7 @@ async function loadModalOverlayFamilies() {
   }
   applyDynamicVariableFields();
   modal.loadingOverlayFamilies = false;
-  renderModal();
+  renderModalPreservingPrompt();
   loadOverlayPreview();
 }
 
@@ -1444,9 +1504,9 @@ async function loadModalOverlayFamilies() {
 async function loadOverlayPreview() {
   const family = modal.overlayFamily;
   if (modal.overlayPreviewUrl) { URL.revokeObjectURL(modal.overlayPreviewUrl); modal.overlayPreviewUrl = null; }
-  if (!family) { modal.loadingOverlayPreview = false; renderModal(); return; }
+  if (!family) { modal.loadingOverlayPreview = false; renderModalPreservingPrompt(); return; }
   modal.loadingOverlayPreview = true;
-  renderModal();
+  renderModalPreservingPrompt();
   let objectUrl = null;
   try {
     // uniqueTag lets the server substitute this product's own
@@ -1469,7 +1529,7 @@ async function loadOverlayPreview() {
   }
   modal.overlayPreviewUrl = objectUrl;
   modal.loadingOverlayPreview = false;
-  renderModal();
+  renderModalPreservingPrompt();
 }
 
 function onAspectRatioChange(value) {
@@ -1479,6 +1539,7 @@ function onAspectRatioChange(value) {
 
 async function refillPromptDefault() {
   modal.loadingDefault = true;
+  modal.promptError = null;
   renderModal();
   try {
     // apiUrl(), not a raw path -- /api/prompt-default resolves the
@@ -1490,15 +1551,70 @@ async function refillPromptDefault() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: modal.videoType }),
     });
-    const body = await res.json();
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Couldn't load the default prompt (" + res.status + ")");
     modal.prompt = body.prompt || "";
-  } catch { /* leave prompt as-is */ }
+  } catch (err) {
+    // Surfaced instead of swallowed -- e.g. the stale-uniqueTag 404
+    // ("Product not found — try Refresh") used to leave the Prompt
+    // field silently empty, which disabled Generate with no indication
+    // why. Leaves any previously-loaded prompt text alone.
+    modal.promptError = err.message;
+  }
   modal.loadingDefault = false;
-  renderModal();
+  enablePromptFieldInPlace("promptFieldRoot", modal.prompt, TYPE_HINTS[modal.videoType], !!modal.promptError) || renderModal();
+}
+
+// Confirmed live (via beforeinput/input event instrumentation inside the
+// real embedded admin iframe -- never reproduced on a bare
+// top-level page): a merchant's very first keystroke into the Prompt box
+// right as it becomes enabled can land at position 0 even though
+// beforeinput reports the correct, click-placed selectionStart --
+// because root.innerHTML replacement always creates a brand-new
+// <textarea> node, and that freshly-parsed node's native text-editing
+// engine can still be desynced from its own just-computed, visually
+// correct caret position for this exact disabled -> enabled transition.
+// Mutating the SAME long-lived node in place (never recreating it) for
+// this one transition sidesteps the issue instead of chasing it.
+// Shared by the single-type Prompt field and the checkbox multi-select's
+// own per-type ones. Returns true on success so callers can fall back to
+// a full renderModal() if the expected structure isn't there (e.g. the
+// modal moved on to a different step while this fetch was in flight).
+function enablePromptFieldInPlace(rootId, value, hint, hasError) {
+  if (hasError) return false;
+  const fieldRoot = document.getElementById(rootId);
+  const textarea = fieldRoot && fieldRoot.querySelector("textarea");
+  const hintEl = fieldRoot && fieldRoot.querySelector(".field-hint");
+  if (!textarea || !hintEl) return false;
+  textarea.disabled = false;
+  textarea.value = value;
+  hintEl.textContent = hint;
+  syncSubmitButtonState();
+  return true;
+}
+
+// The submit button is rendered disabled while the default prompt loads; enabling the textarea in place does not re-render the
+// modal, so bring the button in step here (otherwise it stays disabled until something else happens to re-render).
+function syncSubmitButtonState() {
+  document.querySelectorAll(".modal button.btn-primary").forEach((btn) => {
+    const handler = btn.getAttribute("onclick") || "";
+    if (handler.indexOf("startGenerationMulti") !== -1) btn.disabled = !canSubmitMulti();
+    else if (handler.indexOf("startGeneration()") !== -1) btn.disabled = !canSubmit();
+  });
 }
 
 function onFieldChange(field, value) {
   modal[field] = value;
+  // Direct DOM tweak, not a full renderModal() -- same reasoning as
+  // onVariableValueChange/onPromptByTypeChange: this fires on every
+  // keystroke, and re-rendering here would wipe the textarea's own
+  // focus/cursor mid-type. Mirrors refresh()'s own showRefreshError
+  // banner pattern below.
+  if (field === "prompt" && modal.promptError) {
+    modal.promptError = null;
+    const el = document.getElementById("promptError");
+    if (el) el.style.display = "none";
+  }
 }
 
 function onOverlayFamilyChange(value) {
@@ -1579,6 +1695,12 @@ const CUSTOM_VALUE_SENTINEL = "__custom__";
 function onVariableKeyChange(index, value) {
   modal.variableRows[index].key = value;
   modal.variablesTouched = true;
+  // Only the dropdown path (declared overlay fields) needs other rows'
+  // own dropdowns re-rendered to drop/restore this key from their
+  // option lists -- the free-text input path (no declared fields at
+  // all) fires on every keystroke via oninput, and re-rendering there
+  // would wipe the input's own focus mid-type.
+  if (modal.dynamicVariableOptions.length) renderVariableFields();
 }
 
 // Free-text path -- only reachable while that row's dropdown is on
@@ -1617,8 +1739,19 @@ function onVariableValueSelect(index, selectedKey) {
   renderVariableFields();
 }
 
+// Free-text mode (no declared fields at all) has no fixed set to run out
+// of, so it's always "has room". Dropdown mode is exhausted once every
+// declared key is already claimed by some row -- a further row could
+// only ever duplicate one that's already there.
+function hasUnusedDeclaredKey() {
+  if (!modal.dynamicVariableOptions.length) return true;
+  const usedKeys = modal.variableRows.map((r) => r.key);
+  return modal.dynamicVariableOptions.some((k) => !usedKeys.includes(k));
+}
+
 function addVariableRow() {
   if (modal.variableRows.length >= MAX_OVERLAY_VARIABLES) return;
+  if (!hasUnusedDeclaredKey()) return;
   const usedKeys = modal.variableRows.map((r) => r.key);
   const nextDeclared = modal.dynamicVariableOptions.find((k) => !usedKeys.includes(k));
   const key = modal.dynamicVariableOptions.length
@@ -1677,7 +1810,13 @@ function keyFieldHtml(row, index) {
     return '<input type="text" placeholder="Token name (e.g. v1 or Description)" value="' + escapeHtml(row.key) +
       '" oninput="onVariableKeyChange(' + index + ', this.value)" />';
   }
-  const options = modal.dynamicVariableOptions.map((key) =>
+  // Exclude keys already claimed by a different row -- same two variables
+  // mapped to the same overlay token is never a valid combination -- but
+  // always keep this row's own current key so its selection doesn't
+  // silently disappear out from under it.
+  const usedByOtherRows = modal.variableRows.filter((r, i) => i !== index).map((r) => r.key);
+  const availableKeys = modal.dynamicVariableOptions.filter((key) => key === row.key || !usedByOtherRows.includes(key));
+  const options = availableKeys.map((key) =>
     '<option value="' + escapeHtml(key) + '"' + (key === row.key ? ' selected' : '') + '>' +
       escapeHtml(humanizeVariableName(key)) + '</option>'
   ).join("");
@@ -1706,7 +1845,7 @@ function variableFieldsHtml() {
       keyFieldHtml(row, index) + ' ' +
       valueSelectHtml(row, index) + removeBtn + '</div>';
   }).join("");
-  const addBtn = modal.variableRows.length < MAX_OVERLAY_VARIABLES
+  const addBtn = (modal.variableRows.length < MAX_OVERLAY_VARIABLES && hasUnusedDeclaredKey())
     ? '<button type="button" class="btn-text" onclick="addVariableRow()">+ Add variable</button>'
     : "";
   return rows + addBtn;
@@ -1748,6 +1887,11 @@ function isImageTransitionCurrent() {
   return !!current && current.videoType === "image_transition";
 }
 
+function isHeroProductCurrent() {
+  const current = modal.queue[modal.queueIndex];
+  return !!current && current.videoType === "hero_product";
+}
+
 // The queue/selections machinery below supports more than one item --
 // the preview-picker step is identical either way, walking one type at
 // a time regardless of how many are queued. This single-type path
@@ -1783,6 +1927,19 @@ function startGenerationMulti() {
 
 async function generatePreviewForCurrent() {
   const current = modal.queue[modal.queueIndex];
+  // Neither Image Transitions nor Hero Product auto-generates AI stills
+  // on entry anymore -- both show the product's own real photos first
+  // and let the merchant opt into AI generation via "Generate Images"
+  // (see enterStillsSelection/generateStillsBatch). Lifestyle is
+  // unaffected -- it keeps the old auto-generate-4-candidates flow
+  // below, since it never required a reference image at all. Branching
+  // here (rather than at startGeneration/startGenerationMulti's call
+  // sites) covers every caller for free, including commitCurrent's
+  // queue-advance when more than one video type was queued.
+  if (current.videoType === "image_transition" || current.videoType === "hero_product") {
+    await enterStillsSelection();
+    return;
+  }
   // The merchant can press "Skip preview, generate anyway" or Cancel while the stills are still loading; that closes (or
   // replaces) the modal, and the late answer must then be ignored instead of writing into a modal that no longer exists.
   const thisModal = modal;
@@ -1825,10 +1982,314 @@ function retryPreview() { generatePreviewForCurrent(); }
 
 function selectImage(url) { commitCurrent({ startImageUrl: url }); }
 function skipPreview() { commitCurrent({}); }
-// Image Transitions has no per-tile pick / skip -- all 4 preview images
-// are required (no text-to-video fallback for this render mode), so
-// this is the only way to advance past its 'picking' step.
-function confirmImageTransitionImages() { commitCurrent({ startImageUrls: modal.previewImages.map((img) => img.url) }); }
+
+// The combined pool: the product's own real photos (loaded here
+// immediately, no AI call yet) plus whatever AI stills the merchant
+// generates on top via generateStillsBatch below. Shared by Image
+// Transitions (pick exactly 4, ordered) and Hero Product (pick at most
+// 1, unordered) -- maxSelect is what the rest of this step's selection/
+// drag/badge/confirm logic branches on.
+async function enterStillsSelection() {
+  modal.step = "selecting-stills";
+  modal.pool = []; modal.selectedIds = []; modal.poolError = null;
+  modal.maxSelect = isImageTransitionCurrent() ? 4 : 1;
+  modal.loadingPool = true;
+  renderModal();
+  try {
+    const res = await fetch(apiUrl("/api/product-images/" + encodeURIComponent(modal.tag)));
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
+    // Only the first 4 by default -- a merchant with a large photo
+    // library shouldn't have to scroll past a dozen+ tiles just to
+    // reach the AI-generation controls. Any of the product's OTHER
+    // photos beyond these 4 are still reachable per-tile via Change
+    // Image (onChangeImageClick re-fetches the full list and offers
+    // back whatever isn't already in the pool).
+    modal.pool = (body.images || []).slice(0, 4).map((img, i) => ({ ...img, id: "real:" + i }));
+  } catch (err) {
+    modal.poolError = err.message || "Couldn't load this product's photos.";
+  }
+  modal.loadingPool = false;
+  renderModal();
+}
+
+// "Generate Images"/"Regenerate Images" -- the only remaining call site
+// for /api/preview-images on either type that reaches this step (same
+// single-reference-image payload as before this feature; the backend
+// already branches hero_product's creative_brief vs image_transition's
+// theme internally). Regenerate REPLACES the previous AI batch rather
+// than adding to it -- mirrors the old "Regenerate these 4"
+// discard-and-replace behavior, and keeps the pool from growing
+// unbounded across repeated clicks.
+async function generateStillsBatch() {
+  const current = modal.queue[modal.queueIndex];
+  modal.generatingStills = true; modal.poolError = null;
+  renderModal();
+  try {
+    const res = await fetch(apiUrl("/api/preview-images"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uniqueTag: modal.tag, videoType: current.videoType, prompt: current.prompt, aspectRatio: current.aspectRatio }),
+    });
+    const body = await res.json();
+    if (!res.ok || body.error) throw new Error(body.error || "Could not generate images");
+    // Same candidates-version carry-through as the old flow -- advances
+    // this version at commitCurrent time instead of allocating a fresh one.
+    current.versionId = body.versionId;
+    modal.pool = modal.pool.filter((p) => p.source !== "ai");
+    modal.selectedIds = modal.selectedIds.filter((id) => modal.pool.some((p) => p.id === id));
+    const stamp = Date.now();
+    (body.images || []).forEach((img, i) => modal.pool.push({ url: img.url, source: "ai", id: "ai:" + stamp + ":" + i }));
+  } catch (err) {
+    console.error("Generating stills failed:", err.message);
+    modal.poolError = "Couldn't generate images. Try again, or contact support if this keeps happening.";
+  }
+  modal.generatingStills = false;
+  renderModal();
+}
+
+function stillsGenerateLabel() {
+  // Same state-driven label convention as submitLabel().
+  return modal.pool.some((p) => p.source === "ai") ? "Regenerate Images" : "Generate Images";
+}
+
+// Click to select/deselect. Image Transitions (maxSelect 4): selection
+// order IS the final animation sequence (see confirmStillsSelection),
+// so a tile only ever appends or removes -- once full, further clicks on
+// an unselected tile are no-ops until something is deselected first.
+// Hero Product (maxSelect 1): there's no order to preserve, so clicking
+// a different tile just replaces whichever one was selected -- radio-
+// button behavior, not "stuck at cap."
+function toggleStillSelection(id) {
+  const i = modal.selectedIds.indexOf(id);
+  if (i !== -1) {
+    modal.selectedIds.splice(i, 1);
+  } else if (modal.maxSelect === 1) {
+    modal.selectedIds = [id];
+  } else if (modal.selectedIds.length < modal.maxSelect) {
+    modal.selectedIds.push(id);
+  }
+  renderStillsPool();
+}
+
+function onStillDragStart(e, id) { e.dataTransfer.setData("text/plain", id); }
+function onStillDragOver(e) { e.preventDefault(); }
+function onStillDrop(e, targetId) {
+  e.preventDefault();
+  const draggedId = e.dataTransfer.getData("text/plain");
+  const from = modal.selectedIds.indexOf(draggedId), to = modal.selectedIds.indexOf(targetId);
+  if (from === -1 || to === -1 || from === to) return;
+  modal.selectedIds.splice(from, 1);
+  modal.selectedIds.splice(to, 0, draggedId);
+  renderStillsPool();
+}
+
+// "Change Image" (real tiles only) -- NOT an upload. Looks up this
+// product's full current photo list and offers whichever ones aren't
+// already a tile in the pool, so the merchant can swap this tile for
+// another of the product's own existing photos with no upload needed.
+// Re-fetched fresh each time (not reused from enterStillsSelection's
+// original load) since an "Upload Image" click earlier in this same
+// session may have added new photos to the product since then.
+async function onChangeImageClick(id) {
+  modal.changeImageTileId = id;
+  modal.otherRealImages = [];
+  modal.loadingOtherImages = true;
+  renderStillsPool();
+  try {
+    const res = await fetch(apiUrl("/api/product-images/" + encodeURIComponent(modal.tag)));
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
+    const poolUrls = new Set(modal.pool.map((p) => p.url));
+    modal.otherRealImages = (body.images || []).filter((img) => !poolUrls.has(img.url)); // { url, displayUrl }
+  } catch {
+    modal.otherRealImages = [];
+  }
+  modal.loadingOtherImages = false;
+  renderStillsPool();
+}
+
+function closeChangeImagePanel() {
+  modal.changeImageTileId = null;
+  renderStillsPool();
+}
+
+// Swaps this tile's image for another of the product's own photos --
+// same id/position/selection state, only the url changes.
+function selectOtherImageForTile(tileId, url) {
+  const tile = modal.pool.find((p) => p.id === tileId);
+  const picked = modal.otherRealImages.find((img) => img.url === url);
+  if (tile) { tile.url = url; tile.displayUrl = picked && picked.displayUrl; }
+  modal.changeImageTileId = null;
+  renderStillsPool();
+}
+
+// "Upload Image" (next to Generate/Regenerate Images) -- a brand new
+// file becomes a brand new tile in the pool, it never replaces an
+// existing one (that's what Change Image's picker above is for).
+function onUploadImageClick() {
+  document.getElementById("stillUploadInput").click();
+}
+
+async function onStillFileSelected(event) {
+  const file = event.target.files[0];
+  event.target.value = ""; // allow picking the same file again later
+  if (!file) return;
+  const tile = { id: "upload:" + Date.now(), source: "real", url: "", uploading: true };
+  modal.pool.push(tile);
+  modal.uploadingNewTile = true;
+  renderStillsPool();
+  try {
+    const res = await fetch(
+      apiUrl("/api/upload-still-image?uniqueTag=" + encodeURIComponent(modal.tag) + "&filename=" + encodeURIComponent(file.name)),
+      { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }
+    );
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Upload failed");
+    // The adapter hosts the upload itself (a signed link the video engine can fetch); the store's own gallery is not touched.
+    tile.url = body.url;
+    tile.displayUrl = body.displayUrl || body.url;
+    tile.uploading = false;
+  } catch (err) {
+    // The placeholder tile never got a real image -- drop it rather
+    // than leave a permanently-broken tile in the pool, and surface the
+    // failure the same way generateStillsBatch's own errors show.
+    modal.pool = modal.pool.filter((p) => p.id !== tile.id);
+    modal.poolError = err.message || "Couldn't upload this image.";
+  }
+  modal.uploadingNewTile = false;
+  renderStillsPool();
+}
+
+// Targeted re-render (mirrors renderVariableFields()) -- selecting/
+// reordering/uploading shouldn't trigger a full renderModal() and lose
+// scroll position.
+function renderStillsPool() {
+  const productEl = document.getElementById("productImagesRoot");
+  if (productEl) productEl.innerHTML = productImagesGridHtml();
+  const generatedSection = document.getElementById("generatedImagesSection");
+  if (generatedSection) generatedSection.outerHTML = generatedImagesSectionHtml();
+  const actionsEl = document.getElementById("stillsActionsRoot");
+  if (actionsEl) actionsEl.innerHTML = stillsActionsHtml();
+}
+
+// "Generate/Regenerate Images" (AI) + "Upload Image" (a merchant's own
+// file, added as a new tile) -- kept together since both just add to the
+// same pool, unlike Change Image which replaces one existing tile.
+function stillsActionsHtml() {
+  return '<button type="button" class="btn-text" ' + (modal.generatingStills ? 'disabled' : '') + ' onclick="generateStillsBatch()">' +
+      (modal.generatingStills ? 'Generating…' : stillsGenerateLabel()) +
+    '</button>' +
+    '<button type="button" class="btn-text" ' + (modal.uploadingNewTile ? 'disabled' : '') + ' onclick="onUploadImageClick()">' +
+      (modal.uploadingNewTile ? 'Uploading…' : 'Upload Image') +
+    '</button>';
+}
+
+// The "Change Image" picker panel for one tile -- replaces its normal
+// hover overlay while open (forced visible via an inline style, same
+// trick the uploading spinner below already uses), listing whichever of
+// this product's photos aren't already in the pool.
+function changeImagePanelHtml(tile) {
+  let body;
+  if (modal.loadingOtherImages) {
+    body = '<div class="spinner"></div>';
+  } else if (!modal.otherRealImages.length) {
+    body = '<span>No other product photos</span>';
+  } else {
+    body = '<div class="tile-overlay-picker">' + modal.otherRealImages.map((img) =>
+      '<button type="button" class="tile-overlay-pick" onclick="event.stopPropagation(); selectOtherImageForTile(\'' + tile.id + '\', \'' + escapeHtml(img.url) + '\')">' +
+        '<img src="' + escapeHtml(img.displayUrl || img.url) + '" alt="Product photo" />' +
+      '</button>'
+    ).join("") + '</div>';
+  }
+  return '<div class="tile-overlay" style="display:flex">' + body +
+    '<button type="button" class="btn-text" style="color:#fff;padding:4px 0" onclick="event.stopPropagation(); closeChangeImagePanel()">Cancel</button>' +
+  '</div>';
+}
+
+function stillTileHtml(tile) {
+  if (tile.uploading) {
+    return '<div class="preview-tile uploading-tile"><div class="spinner"></div></div>';
+  }
+  const idx = modal.selectedIds.indexOf(tile.id);
+  const selected = idx !== -1;
+  const isReal = tile.source === "real";
+  // Dragging to reorder only makes sense when more than one tile can be
+  // selected (Image Transitions' animation sequence) -- Hero Product's
+  // single pick has nothing to order. The badge itself still shows for
+  // both (a border/shadow alone was confirmed too subtle to notice at a
+  // glance), just a checkmark instead of a position number when there's
+  // no order to display.
+  const orderable = modal.maxSelect > 1;
+  const draggable = selected && orderable
+    ? ' draggable="true" ondragstart="onStillDragStart(event,\'' + tile.id + '\')" ondragover="onStillDragOver(event)" ondrop="onStillDrop(event,\'' + tile.id + '\')"'
+    : "";
+  const overlay = modal.changeImageTileId === tile.id
+    ? changeImagePanelHtml(tile)
+    : (isReal
+        ? '<div class="tile-overlay"><span>Change Image</span><button type="button" class="tile-overlay-btn" onclick="event.stopPropagation(); onChangeImageClick(\'' + tile.id + '\')">⇪</button></div>'
+        : "");
+  return '<div class="preview-tile' + (selected ? ' selected' : '') + '" data-source="' + tile.source + '"' + draggable +
+      ' onclick="toggleStillSelection(\'' + tile.id + '\')">' +
+    '<img src="' + escapeHtml(tile.displayUrl || tile.url) + '" alt="' + (isReal ? "Product photo" : "AI-generated still") + '" />' +
+    (selected ? '<span class="still-badge">' + (orderable ? (idx + 1) : "✓") + '</span>' : "") +
+    overlay +
+  '</div>';
+}
+
+// Two visually separate rows, not one combined grid -- a merchant's own
+// real product photos (including anything uploaded, which always joins
+// THIS row regardless of when it was added) always stay distinct from
+// AI-generated stills. Filtering modal.pool by source (rather than
+// relying on array order) is what guarantees this: an upload pushed
+// after some AI tiles already exist still renders in the product-photos
+// row, since rendering position comes from this filter, not insertion
+// order.
+function productImagesGridHtml() {
+  if (modal.loadingPool) {
+    return '<div class="loading-block"><div class="spinner"></div><p class="muted">Loading this product\'s photos…</p></div>';
+  }
+  return modal.pool.filter((p) => p.source === "real").map(stillTileHtml).join("");
+}
+
+// The whole section (caption + grid) is swapped in/out together via its
+// own id (see renderStillsPool's outerHTML replacement) -- hidden
+// entirely until the merchant's first "Generate Images" click, so there's
+// no empty captioned box before any AI stills exist yet.
+function generatedImagesSectionHtml() {
+  const aiTiles = modal.pool.filter((p) => p.source === "ai");
+  if (!aiTiles.length) return '<div id="generatedImagesSection"></div>';
+  return '<div id="generatedImagesSection">' +
+    '<p class="field-hint" style="margin:10px 0 4px">Generated Images:</p>' +
+    '<div class="preview-grid wide">' + aiTiles.map(stillTileHtml).join("") + '</div>' +
+  '</div>';
+}
+
+// Image Transitions requires exactly 4 (no text-to-video fallback for
+// this render mode); Hero Product requires exactly 1 -- its own
+// "Skip, generate anyway" button alongside this one (see skipPreview)
+// is the deliberate escape hatch for 0, so this never needs to accept
+// that case itself. The button itself is always enabled (no disabled
+// state to puzzle over) -- clicking with the wrong count just explains
+// what's missing instead of silently doing nothing; clicking with the
+// right count proceeds immediately, same as before.
+function confirmStillsSelection() {
+  if (modal.selectedIds.length !== modal.maxSelect) {
+    const el = document.getElementById("stillsSelectionError");
+    if (el) {
+      el.textContent = modal.maxSelect === 1
+        ? "Please select an image, or use Skip."
+        : "Please select " + modal.maxSelect + " images.";
+      // display:none by default (see its markup) so an empty message
+      // takes no space at all above the buttons -- only reserve that
+      // row once there's actually something to show.
+      el.style.display = "block";
+    }
+    return;
+  }
+  const urls = modal.selectedIds.map((id) => modal.pool.find((p) => p.id === id)?.url).filter(Boolean);
+  if (modal.maxSelect === 1) commitCurrent({ startImageUrl: urls[0] });
+  else commitCurrent({ startImageUrls: urls });
+}
 
 // Shared by commitCurrent (Generate/Regenerate) and submitUpdateOverlay
 // -- turns a modal's variable rows into the two payloads the server
@@ -2045,12 +2506,6 @@ function renderModal() {
     return '<select onchange="onFieldChange(\'animation\', this.value)">' + options + '</select>';
   }
 
-  const TYPE_HINTS = {
-    hero_product: "Uses this product's own photo as a locked reference image — always renders fresh, no reuse.",
-    lifestyle: "Overrides the category's default theme for this video only — also uses this product's photo, when it has one.",
-    image_transition: "A single 8s clip assembled from 4 stills of this product (no AI video call) — next you'll see and confirm all 4 before generating.",
-  };
-
   // The checkbox multi-select's own type picker (radio was single-select
   // only) -- shown with each type's own description right there, since
   // this is the ONLY place a merchant sees all three side by side before
@@ -2082,9 +2537,13 @@ function renderModal() {
       '</div>' +
       effectField +
       '<div id="variableFieldsRoot">' + variableFieldsHtml() + '</div>' +
-      '<div class="field"><label>' + label + ' Prompt</label><textarea rows="3" ' + (modal.loadingDefault ? 'disabled' : '') +
+      '<div class="field" id="promptFieldRoot"><label>' + label + ' Prompt</label><textarea rows="3" ' + (modal.loadingDefault ? 'disabled' : '') +
         ' oninput="onFieldChange(\'prompt\', this.value)" placeholder="Describe the scene/creative direction">' + escapeHtml(modal.prompt) + '</textarea>' +
-        '<div class="field-hint">' + (modal.loadingDefault ? "Loading default…" : TYPE_HINTS[modal.videoType]) + '</div></div>' +
+        '<div class="field-hint">' + (modal.loadingDefault ? "Loading default…" : TYPE_HINTS[modal.videoType]) + '</div>' +
+        (modal.promptError
+          ? '<div class="refresh-error" id="promptError">' + escapeHtml(modal.promptError) + '</div>'
+          : '<div class="refresh-error" id="promptError" style="display:none"></div>') +
+      '</div>' +
       '<p class="muted">Fixed at 8 seconds. Next: pick a starting frame from 4 options' + (modal.videoType === "image_transition" ? " (all 4 are used)" : "") + '.</p>';
   }
 
@@ -2101,9 +2560,12 @@ function renderModal() {
       : "";
     const promptFields = VIDEO_TYPES.filter((t) => modal.videoTypes.includes(t)).map((t) => {
       const loading = modal.loadingDefaultByType[t];
-      return '<div class="field"><label>' + FULL_TYPE_LABELS[t] + ' Prompt</label><textarea rows="3" ' + (loading ? 'disabled' : '') +
+      const error = modal.promptErrorByType[t];
+      return '<div class="field" id="promptFieldRoot-' + escapeHtml(t) + '"><label>' + FULL_TYPE_LABELS[t] + ' Prompt</label><textarea rows="3" ' + (loading ? 'disabled' : '') +
         ' oninput="onPromptByTypeChange(\'' + t + '\', this.value)" placeholder="Describe the scene/creative direction">' + escapeHtml(modal.promptByType[t] || "") + '</textarea>' +
-        '<div class="field-hint">' + (loading ? "Loading default…" : TYPE_HINTS[t]) + '</div></div>';
+        '<div class="field-hint">' + (loading ? "Loading default…" : TYPE_HINTS[t]) + '</div>' +
+        (error ? '<div class="refresh-error">' + escapeHtml(error) + '</div>' : "") +
+      '</div>';
     }).join("");
     return '<div class="field"><label>Aspect Ratio</label>' + sizeSelect() + '</div>' +
       '<div class="field"><label>Overlay</label>' + overlayFamilySelect() +
@@ -2113,7 +2575,7 @@ function renderModal() {
       effectField +
       '<div id="variableFieldsRoot">' + variableFieldsHtml() + '</div>' +
       promptFields +
-      '<p class="muted">Fixed at 8 seconds each. Next: pick a starting frame from 4 options, one type at a time' + (modal.videoTypes.includes("image_transition") ? " (Image Transitions uses all 4)" : "") + '.</p>';
+      '<p class="muted">Fixed at 8 seconds each. Next: pick a starting image for each selected type, one at a time' + (modal.videoTypes.includes("image_transition") ? " (Image Transitions uses all 4)" : "") + '.</p>';
   }
 
   let body = "";
@@ -2178,20 +2640,32 @@ function renderModal() {
     const skipBtn = isImageTransitionCurrent() ? "" : '<button class="btn-text" onclick="skipPreview()">Skip preview, generate anyway</button>';
     body = '<div class="modal-header">Generating ' + currentTypeLabel() + ' preview options…</div><div class="modal-body"><div class="loading-block"><div class="spinner"></div><p class="muted">This takes about 10-20 seconds.</p></div></div>' +
       '<div class="modal-actions">' + skipBtn + '</div>';
-  } else if (modal.step === "picking" && isImageTransitionCurrent()) {
-    // stillCount reflects modal.previewImages.length, NOT a hardcoded 4 --
-    // the video-engine backend's /preview-images endpoint (external,
-    // Flipick-owned) doesn't always return exactly 4 stills despite the
-    // doc comment on generatePreviewImages() describing a 4-image
-    // response; this modal has to accurately describe whatever count
-    // actually came back rather than claim "4" and show fewer.
-    const stillCount = modal.previewImages.length;
-    body = '<div class="modal-header">Confirm the ' + stillCount + ' Image Transitions still' + (stillCount === 1 ? '' : 's') + '</div><div class="modal-body">' +
-      '<p class="muted">All ' + stillCount + ' image' + (stillCount === 1 ? '' : 's') + ' below will be used, animating between them (Ken Burns/pan/crossfade) in this order to make the final 8s clip — there\'s no pick-one or skip for this type.</p>' +
-      '<div class="preview-grid">' + modal.previewImages.map((img) =>
-        '<div class="preview-tile static"><img src="' + escapeHtml(img.url) + '" alt="Image Transitions still" /></div>'
-      ).join("") + '</div></div>' +
-      '<div class="modal-actions"><button class="btn-text" onclick="backToForm()">Back</button><button class="btn-text" onclick="retryPreview()">Regenerate these ' + stillCount + '</button><button class="btn-primary" onclick="confirmImageTransitionImages()">Use these ' + stillCount + ' image' + (stillCount === 1 ? '' : 's') + '</button></div>';
+  } else if (modal.step === "selecting-stills") {
+    const header = modal.maxSelect === 1 ? "Select a Hero Product starting image" : "Select and order 4 Image Transitions stills";
+    const instructions = modal.maxSelect === 1
+      ? "Pick one image below (click to select) -- the Hero Product video will be generated starting from it."
+      : "Pick exactly 4 images below (click to select/deselect), then drag the numbered tiles to set the animation order.";
+    const confirmLabel = modal.maxSelect === 1 ? "Use this image" : "Use these 4 images";
+    // Hero Product still supports a pure text-to-video fallback with no
+    // reference image at all (same as its old picker) -- Image
+    // Transitions has no such fallback (its render mode requires 4 real
+    // stills), so it gets no Skip button.
+    const skipBtn = modal.maxSelect === 1 ? '<button class="btn-text" onclick="skipPreview()">Skip, generate anyway</button>' : "";
+    body = '<div class="modal-header">' + header + '</div><div class="modal-body">' +
+      '<p class="muted" style="margin-top:0">' + instructions + ' Hover a product photo to swap it for another.</p>' +
+      (modal.poolError ? '<div class="refresh-error">' + escapeHtml(modal.poolError) + '</div>' : "") +
+      '<p class="field-hint" style="margin:0 0 4px">Product Images:</p>' +
+      '<div id="productImagesRoot" class="preview-grid wide">' + productImagesGridHtml() + '</div>' +
+      generatedImagesSectionHtml() +
+      '<input type="file" accept="image/*" id="stillUploadInput" style="display:none" onchange="onStillFileSelected(event)" />' +
+      '<div id="stillsActionsRoot">' + stillsActionsHtml() + '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<span id="stillsSelectionError" class="field-hint" style="display:none;color:#b00020;width:100%;text-align:right"></span>' +
+        '<button class="btn-text" onclick="backToForm()">Back</button>' +
+        skipBtn +
+        '<button class="btn-primary" id="confirmStillsBtn" onclick="confirmStillsSelection()">' + confirmLabel + '</button>' +
+      '</div>';
   } else if (modal.step === "picking") {
     body = '<div class="modal-header">Pick a ' + currentTypeLabel() + ' starting frame</div><div class="modal-body">' +
       '<p class="muted">The ' + currentTypeLabel() + ' video will be generated starting from whichever frame you pick.</p>' +
@@ -2214,15 +2688,85 @@ function renderModal() {
   // every keystroke once its content is tall enough to scroll. Carry
   // the previous scroll position over onto the new element instead.
   const prevScrollTop = root.querySelector(".modal")?.scrollTop || 0;
-  root.innerHTML = '<div class="modal-backdrop"><div class="modal">' + body + '</div></div>';
+
+  // Several async completions (loadModalOverlayFamilies, loadOverlayPreview,
+  // refillPromptDefault, ...) call this same renderModal() once their
+  // fetch resolves, with no way to know whether the merchant is mid-
+  // keystroke in some OTHER field at that exact moment -- the oninput
+  // handlers on the Prompt/custom-value fields themselves deliberately
+  // never re-render (see onFieldChange's own comment), but they can't
+  // protect against an unrelated render landing while they're focused.
+  // A plain innerHTML replacement recreates every element, so the
+  // merchant's focus is dropped and the brand-new textarea/input starts
+  // unfocused with no selection -- surfaced as "typing resets to the
+  // start of the box" if one of these completions happens to land while
+  // the merchant is already mid-edit (loadAttributeOptions is genuinely
+  // fire-and-forget from openModal, so its own completion timing is
+  // uncorrelated with everything else). Identified by its own
+  // oninput/onchange attribute text, which is stable across renders for
+  // the same logical field (e.g. the Prompt box always carries the same
+  // handler string). Moving the actual live node across the replacement
+  // (instead of recreating its state by hand) sidesteps the need to
+  // capture/replay selectionStart/selectionEnd at all: they're just
+  // properties of the DOM node itself and survive being briefly
+  // detached, so re-inserting the SAME node and calling .focus() on it
+  // is enough, no matter how many of these async renders land back-to-
+  // back. (The specific, confirmed cursor-jump bug on a merchant's very
+  // first keystroke right as the Prompt box becomes enabled turned out
+  // to be a different issue entirely -- see enablePromptFieldInPlace --
+  // this swap is a separate, general safety net for any OTHER render
+  // that might land while a field is already focused.)
+  const active = document.activeElement;
+  let focusAttr = null, focusValue = null;
+  if (active && root.contains(active) && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) {
+    focusAttr = active.hasAttribute("oninput") ? "oninput" : (active.hasAttribute("onchange") ? "onchange" : null);
+    if (focusAttr) focusValue = active.getAttribute(focusAttr);
+  }
+  const modalClass = "modal" + (modal.step === "selecting-stills" ? " wide" : "");
+  root.innerHTML = '<div class="modal-backdrop"><div class="' + modalClass + '">' + body + '</div></div>';
   const newModalEl = root.querySelector(".modal");
   if (newModalEl) newModalEl.scrollTop = prevScrollTop;
+
+  if (focusAttr && focusValue) {
+    const placeholder = root.querySelector('[' + focusAttr + '="' + focusValue.replace(/"/g, '\"') + '"]');
+    if (placeholder && placeholder.tagName === active.tagName) {
+      placeholder.replaceWith(active);
+      active.focus();
+    }
+  }
+}
+
+// loadAttributeOptions/loadModalOverlayFamilies/loadOverlayPreview never
+// touch modal.prompt/modal.promptByType or their loading flags -- their
+// own renderModal() calls only need to reflect THEIR OWN new state
+// (attribute options, overlay family list, preview image), never the
+// Prompt box. The activeElement-based swap in renderModal() above only
+// helps once the merchant has actually focused the field by the exact
+// synchronous instant one of these fires; unconditionally keeping the
+// Prompt field node(s) in place across these specific completions covers
+// it even before that point too (e.g. mid-fetch, still showing its own
+// disabled/loading state), with no dependency on focus timing at all.
+function renderModalPreservingPrompt() {
+  const modalRoot = document.getElementById("modalRoot");
+  const oldRoots = Array.from(modalRoot.querySelectorAll('[id^="promptFieldRoot"]'));
+  renderModal();
+  oldRoots.forEach((oldRoot) => {
+    // renderModal()'s own activeElement-based swap (above) already moves
+    // a currently-focused textarea/input into the freshly-built tree,
+    // which empties THIS exact oldRoot wrapper out in the process --
+    // swapping the whole wrapper back in here would throw that already-
+    // relocated live node away instead of leaving it in place. Only
+    // swap the wrapper when it still holds its original field element,
+    // i.e. nothing else has already preserved it this render.
+    if (!oldRoot.querySelector("textarea, input")) return;
+    const newRoot = modalRoot.querySelector("#" + oldRoot.id);
+    if (newRoot && newRoot !== oldRoot) newRoot.replaceWith(oldRoot);
+  });
 }
 document.getElementById("modalRoot").addEventListener("click", (e) => {
   const el = e.target.closest("[data-preview-url]");
   if (el) selectImage(el.dataset.previewUrl);
 });
-
 renderToolbar();
 renderAfterStateChange();
 renderUsageBadge();

@@ -137,6 +137,88 @@ describe("platform", () => {
     });
   });
 
+  describe("stills picker: product photos and uploads", () => {
+    const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 7)]);
+    const upload = (token, body, { uniqueTag = "magento-1-novariant", type = "image/png", filename = "photo.png" } = {}) => fetch(
+      `http://127.0.0.1:${h.ADAPTER_PORT}/api/upload-still-image?uniqueTag=${encodeURIComponent(uniqueTag)}&filename=${encodeURIComponent(filename)}`,
+      { method: "POST", headers: { "Content-Type": type, Authorization: `Bearer ${token}` }, body }
+    );
+
+    it("lists the product's real photos: the real address for the engine, a proxied one for the browser", async () => {
+      await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const r = await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 });
+      assert.equal(r.status, 200);
+      assert.ok(r.body.images.length >= 1);
+      assert.match(r.body.images[0].url, /^https?:\/\//);
+      assert.match(r.body.images[0].displayUrl, /^\/img\//);
+      assert.equal(r.body.images[0].source, "real");
+      assert.equal((await h.api("GET", "/api/product-images/nope-1", { token: sessionA1 })).status, 404);
+      assert.equal((await h.api("GET", "/api/product-images/magento-1-novariant")).status, 401, "needs a session");
+    });
+
+    it("uploads an image, hosts it behind a signed link, and serves it only as an image", async () => {
+      const res = await upload(sessionA1, PNG);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.match(body.url, /\/up\/[A-Za-z0-9_.-]+$/);
+      assert.match(body.displayUrl, /^\/up\//);
+      const got = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}${body.displayUrl}`);
+      assert.equal(got.status, 200);
+      assert.equal(got.headers.get("content-type"), "image/png");
+      assert.equal(got.headers.get("x-content-type-options"), "nosniff");
+      assert.deepEqual(Buffer.from(await got.arrayBuffer()), PNG);
+      assert.equal((await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/up/not-a-real-token-at-all`)).status, 404);
+      const tampered = body.displayUrl.slice(0, -3) + "AAA";
+      assert.equal((await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}${tampered}`)).status, 404);
+    });
+
+    it("refuses what is not a real image, an empty body, and an unknown product", async () => {
+      assert.equal((await upload(sessionA1, Buffer.from("<html><script>alert(1)</script></html>"), { type: "image/png", filename: "evil.png" })).status, 415);
+      assert.equal((await upload(sessionA1, Buffer.from("%PDF-1.7 not an image at all"), { type: "image/jpeg" })).status, 415);
+      assert.equal((await upload(sessionA1, Buffer.alloc(0))).status, 400);
+      assert.equal((await upload(sessionA1, PNG, { uniqueTag: "nope-1" })).status, 404);
+      assert.equal((await upload("garbage", PNG)).status, 401);
+    });
+
+    it("an upload belongs to its store: another store's session cannot list or use it, and rows are isolated", async () => {
+      const mine = await (await upload(sessionA1, PNG)).json();
+      const { rows } = await db.asSystem(() => db.query("SELECT store_id FROM uploaded_images WHERE id = $1", [JSON.parse(Buffer.from(mine.displayUrl.split("/up/")[1].split(".")[0], "base64url").toString()).id]));
+      assert.equal(rows.length, 1);
+      const otherStore = await tenants.getStore(B.installationId, 1);
+      const seen = await db.withStore(otherStore.id, async () => (await db.query("SELECT id FROM uploaded_images")).rows.length);
+      assert.equal(seen, 0, "row-level security hides it from another store");
+    });
+  });
+
+  describe("a product's uniqueTag changes (the variant that supplies its price changes)", () => {
+    it("its videos move to the new tag, keep their history, and a type that already exists under the new tag is left alone", async () => {
+      const videoVersions = require("../src/repositories/VideoVersionRepository");
+      const generatedState = require("../src/services/generatedState");
+      const oldTag = "magento-900-111", newTag = "magento-900-222";
+      await ctx.runWithTenant(await ctxFor(A, 1), async () => {
+        await generatedState.ensureLoaded();
+        const hero = await videoVersions.allocateVersion(oldTag, "hero_product", { status: "ready", aspectRatio: "16:9" });
+        await videoVersions.allocateVersion(oldTag, "lifestyle", { status: "ready", aspectRatio: "16:9" });
+        const newerLifestyle = await videoVersions.allocateVersion(newTag, "lifestyle", { status: "ready", aspectRatio: "16:9" });
+        const moved = await videoVersions.remapUniqueTag(oldTag, newTag);
+        assert.deepEqual(moved, ["hero_product"], "lifestyle already existed under the new tag, so it is not overwritten");
+        const history = await videoVersions.listVersions(newTag, "hero_product");
+        assert.equal(history.length, 1);
+        assert.equal(history[0].id, hero.id);
+        assert.equal((await videoVersions.listVersions(oldTag, "hero_product")).length, 0);
+        assert.equal((await videoVersions.listVersions(newTag, "lifestyle"))[0].id, newerLifestyle.id, "the newer video under the new tag is the one kept");
+        assert.equal((await videoVersions.listVersions(oldTag, "lifestyle")).length, 1, "the old lifestyle video stays as an orphan");
+        assert.deepEqual(await videoVersions.remapUniqueTag(oldTag, oldTag), [], "same tag: nothing to do");
+        assert.deepEqual(await videoVersions.remapUniqueTag(oldTag, newTag), [], "already moved: nothing to do");
+        // the in-memory mirror follows
+        generatedState.set(generatedState.genKey(oldTag, "hero_product"), { status: "ready", id: hero.id });
+        generatedState.rename(generatedState.genKey(oldTag, "hero_product"), generatedState.genKey(newTag, "hero_product"));
+        assert.equal(generatedState.get(generatedState.genKey(oldTag, "hero_product")), undefined);
+        assert.equal(generatedState.get(generatedState.genKey(newTag, "hero_product")).id, hero.id);
+      });
+    });
+  });
+
   describe("tenant isolation", () => {
     it("row-level security hides other stores' rows even from a query with no store filter", async () => {
       const sA1 = await tenants.getStore(A.installationId, 1);

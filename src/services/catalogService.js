@@ -44,13 +44,14 @@ async function resolveAttributeValue(baseUrl, accessToken, attributeCode, rawVal
 // magentoClient.js/normalize.js and shopifyClient.js/normalize.js both keep.
 async function resolveProductForNormalize(product, { baseUrl, accessToken, categoryAttributeCode, mediaBaseUrl, attributeCache }) {
   let child = null;
+  let children = [];
   if (product.type_id === "configurable") {
-    const children = await fetchConfigurableChildren(baseUrl, accessToken, product.sku).catch(() => []);
-    child = (children && children[0]) || null;
+    children = (await fetchConfigurableChildren(baseUrl, accessToken, product.sku).catch(() => [])) || [];
+    child = children[0] || null;
   }
   const rawCategory = findCustomAttribute(product, categoryAttributeCode);
   const category = await resolveAttributeValue(baseUrl, accessToken, categoryAttributeCode, rawCategory, attributeCache);
-  return { child, category, mediaBaseUrl };
+  return { child, children, category, mediaBaseUrl };
 }
 
 async function fetchProducts(baseUrl, accessToken, options = {}) {
@@ -89,6 +90,26 @@ function customAttributeValue(product, key) {
   }
 }
 
+// One Price (and MRP, if it is on special) option per variant, e.g. "Shirt-Small - Price" / "Shirt-Large - Price", so the Variables picker
+// can map more than one variable to more than one variant's price in the same overlay. Only offered when the product really has more
+// than one variant; a single-variant product's price is already the generic Price / MRP options.
+function variantAttributeOptions(product) {
+  if (!Array.isArray(product.variants) || product.variants.length < 2) return [];
+  return product.variants.flatMap((variant) => {
+    const label = variant.title || `Variant ${variant.id}`;
+    const options = [];
+    if (variant.price != null) options.push({ key: `variant:${variant.id}:price`, label: `${label} - Price`, value: formatMoney(variant.price, product.currencyCode) });
+    if (variant.compareAtPrice != null && variant.price != null && variant.compareAtPrice > variant.price) {
+      options.push({ key: `variant:${variant.id}:mrp`, label: `${label} - MRP`, value: formatMoney(variant.compareAtPrice, product.currencyCode) });
+    }
+    return options;
+  });
+}
+
+// The first variant is the generic "Price"/"MRP" value; once a product has several, each is offered under its own name, so the generic
+// pair would only show the same number twice.
+const GENERIC_PRICE_KEYS = ["price", "mrp"];
+
 function humanizeAttributeCode(code) {
   return code.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -111,7 +132,9 @@ function excludedAttributeCodes(categoryAttributeCode) {
 // product's modal actually opens the Custom picker, same as Shopify's
 // per-product metafields fetch was.
 async function getProductAttributeOptions(product, { baseUrl, accessToken, categoryAttributeCode }) {
+  const isMultiVariant = Array.isArray(product.variants) && product.variants.length > 1;
   const fixed = CUSTOM_ATTRIBUTE_OPTIONS
+    .filter((opt) => !(isMultiVariant && GENERIC_PRICE_KEYS.includes(opt.key)))
     .map((opt) => ({ key: opt.key, label: opt.label, value: customAttributeValue(product, opt.key) }))
     .filter((opt) => opt.value !== "");
 
@@ -134,6 +157,6 @@ async function getProductAttributeOptions(product, { baseUrl, accessToken, categ
     // above if the live product/attributes can't be fetched.
   }
 
-  return [...fixed, ...customOptions];
+  return [...fixed, ...variantAttributeOptions(product), ...customOptions];
 }
 module.exports = { fetchProducts, getProductAttributeOptions };

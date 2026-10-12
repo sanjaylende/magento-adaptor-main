@@ -22,7 +22,7 @@ const SPONSORED_ENDPOINT = "/api/v1/sponsored-ads/projects";
 //    whatever already exists for that (theme, category, name) triple.
 const { loggedFetch } = require("../utils/httpLog");
 
-async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayFamily, noOverlay, externalRef, variantName, theme, category, name, values, forceNewProject, brandId, startImageUrl, aspectRatio, source }) {
+async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayFamily, noOverlay, externalRef, variantName, theme, category, name, values, forceNewProject, brandId, startImageUrl, aspectRatio, source, promptIsFinal }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
   if (!tenantId) throw new Error("tenantId is required");
   if (!externalRef) throw new Error("externalRef is required");
@@ -58,6 +58,9 @@ async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayF
     // start_image_url, only takes effect when a base video is actually
     // created/regenerated.
     source: source || undefined,
+    // Set when `theme` above is already the full, real prompt (see getLifestyleDefaultPrompt / getPromptDefault): the engine then
+    // sends it to the model verbatim instead of wrapping it a second time in its own product / brand / closing-frame text.
+    prompt_is_final: promptIsFinal || undefined,
   };
 
   const res = await loggedFetch("flipick", `${baseUrl}${VVP_ENDPOINT}`, {

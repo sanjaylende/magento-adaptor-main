@@ -13,6 +13,7 @@ const publish = require("../controllers/publishController");
 const download = require("../controllers/downloadController");
 const webhook = require("../controllers/webhookController");
 const image = require("../controllers/imageController");
+const stills = require("../controllers/stillImageController");
 const billing = require("../controllers/billingController");
 const paymentWeb = require("../controllers/paymentWebController");
 const invoice = require("../controllers/invoiceController");
@@ -51,6 +52,8 @@ router.post("/mockpay/:txn/complete", paymentWeb.mockEnabled, validate({ params:
 router.get("/invoice/:token", validate({ params: S.params.token }), h(invoice.show));
 router.get("/dl/:token", validate({ params: S.params.token }), h(download.download));
 router.get("/img/:token", perIp("img", 600), validate({ params: S.params.token }), h(image.show));
+// Photos uploaded in the stills picker, fetched by the video engine and the browser through a signed link.
+router.get("/up/:token", perIp("up", 600), validate({ params: S.params.token }), h(stills.serve));
 router.post("/api/webhooks/video-engine", perIp("engine-webhook", 300), limitBody(16 * 1024), validate({ body: S.body.videoEngineWebhook }), h(webhook.videoEngine));
 
 // ---- Extension, server to server (signed): no store needed ----
@@ -69,6 +72,9 @@ forStore.get("/bootstrap", h(bootstrap.bootstrap));
 forStore.get("/products", validate({ query: S.query.products }), h(catalog.list));
 forStore.post("/refresh", perStore("refresh", 6), validate({ body: S.body.emptyish }), catalog.refresh);
 forStore.get("/product-attributes/:uniqueTag", validate({ params: S.params.tag }), catalog.productAttributes);
+forStore.get("/product-images/:uniqueTag", validate({ params: S.params.tag }), h(stills.productImages));
+// The raw file is the whole request body (a File sent as-is); its own parser, since the app-wide ones only act on JSON and forms.
+forStore.post("/upload-still-image", perStore("upload", 30), express.raw({ type: () => true, limit: "15mb" }), validate({ query: S.query.uploadStill }), h(stills.uploadStill));
 forStore.post("/prompt-default", limitBody(2 * 1024), validate({ body: S.body.tagAndType }), catalog.promptDefault);
 
 forStore.get("/overlay-families", validate({ query: S.query.overlayFamilies }), overlay.families);

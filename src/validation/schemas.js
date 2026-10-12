@@ -79,6 +79,7 @@ const query = {
   overlayPreview: z.object({ aspectRatio, uniqueTag: blankToUndefined(tag) }),
   paymentReturn: z.object({ gw: blankToUndefined(gateway) }),
   versionQuery: z.object({ versionId: blankToUndefined(versionId) }),
+  uploadStill: z.object({ uniqueTag: tag, filename: blankToUndefined(text(200)) }),
 };
 
 // ---- staff console forms ----

@@ -34,4 +34,10 @@ function mergeVersion(key, version) {
   m[key] = { ...m[key], ...version, currentVersionId: version.id };
 }
 
-module.exports = { genKey, ensureLoaded, all, get, set, remove, mergeVersion };
+// Moves one slot's in-memory record to another key (a product's uniqueTag changed).
+function rename(oldKey, newKey) {
+  const m = map();
+  if (m[oldKey] && !m[newKey]) { m[newKey] = m[oldKey]; delete m[oldKey]; }
+}
+
+module.exports = { genKey, ensureLoaded, all, get, set, remove, mergeVersion, rename };

@@ -2,7 +2,7 @@
 // remote cleanup. Also decides which overlay values a render sends.
 const {
   generateHeroProductVideo, generateImageTransitionVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled,
-  getCategoryDefault, generatePreviewImages,
+  getCategoryDefault, getLifestyleDefaultPrompt, generatePreviewImages,
 } = require("../integrations/videoEngineClient");
 const { generateVvpVideo, deleteVvpVideos } = require("../integrations/flipickClient");
 const { getThemeForCategory } = require("../config/categoryThemes");
@@ -69,11 +69,9 @@ function resolveOverlayValues(product, { overlayStyle, variableValues } = {}) {
     : offersOverlayValues(product);
 }
 
-// Seeds the Generate Video modal's Prompt field default. Lifestyle uses the
-// category-theme registry (soft default here, unlike generateVideo below --
-// an unmapped category just falls back to empty rather than blocking the
-// user from typing their own prompt). Hero Product fetches Flipick's own
-// per-category suggestion.
+// Seeds the Generate Video modal's Prompt field default. Lifestyle fetches the engine's REAL constructed prompt (GET /default-prompt: the
+// exact text generation would use with no creative brief yet), so the merchant sees and can edit what is actually sent. Hero Product
+// and Image Transitions fetch the engine's per-category suggestion.
 async function getPromptDefault(product, videoType, options) {
   // Image Transitions' preview images take the identical hero_product-style
   // branch server-side, so the same category-based default prompt applies.
@@ -85,10 +83,21 @@ async function getPromptDefault(product, videoType, options) {
     });
     return result.suggested_prompt || "";
   }
+  // The adapter and the engine are deployed separately: against an engine without /default-prompt the call fails, and Lifestyle then
+  // falls back to the old category-theme placeholder, exactly as before this change, instead of showing a broken prompt box.
   try {
-    return getThemeForCategory(product.category);
+    return await getLifestyleDefaultPrompt({
+      baseUrl: options.videoEngineBaseUrl,
+      apiKey: options.videoEngineApiKey,
+      category: product.category,
+      productName: product.name,
+    });
   } catch {
-    return "";
+    try {
+      return getThemeForCategory(product.category);
+    } catch {
+      return "";
+    }
   }
 }
 
@@ -192,6 +201,9 @@ async function generateVideo(product, { videoType, mode = "regenerate", prompt, 
   // in CATEGORY_THEME_REGISTRY, even though that value would never reach
   // Flipick either way.
   const theme = mode === "refresh" ? undefined : (prompt || getThemeForCategory(product.category));
+  // The Prompt field now defaults to the real, full prompt: whatever the merchant submits, edited or not, must reach the engine
+  // verbatim. Only the rare fallback (prompt cleared, short category-theme string used) still needs the engine's own wrapping.
+  const promptIsFinal = mode !== "refresh" && !!prompt;
   const response = await generateVvpVideo({
     baseUrl: options.baseUrl,
     apiKey: options.vvpApiKey,
@@ -203,6 +215,7 @@ async function generateVideo(product, { videoType, mode = "regenerate", prompt, 
     externalRef: product.uniqueTag,
     variantName: product.name,
     theme,
+    promptIsFinal,
     category: product.category,
     name: product.name,
     values: overlay,
