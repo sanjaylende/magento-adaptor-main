@@ -1449,6 +1449,7 @@ async function loadPromptDefaultFor(type) {
   }
   modal.loadingDefaultByType[type] = false;
   enablePromptFieldInPlace("promptFieldRoot-" + type, modal.promptByType[type] || "", TYPE_HINTS[type], !!modal.promptErrorByType[type]) || renderModal();
+  syncSubmitButtons();
 }
 
 function onPromptByTypeChange(type, value) {
@@ -1563,6 +1564,7 @@ async function refillPromptDefault() {
   }
   modal.loadingDefault = false;
   enablePromptFieldInPlace("promptFieldRoot", modal.prompt, TYPE_HINTS[modal.videoType], !!modal.promptError) || renderModal();
+  syncSubmitButtons();
 }
 
 // Confirmed live (via beforeinput/input event instrumentation inside the
@@ -1589,18 +1591,35 @@ function enablePromptFieldInPlace(rootId, value, hint, hasError) {
   textarea.disabled = false;
   textarea.value = value;
   hintEl.textContent = hint;
-  syncSubmitButtonState();
   return true;
 }
 
-// The submit button is rendered disabled while the default prompt loads; enabling the textarea in place does not re-render the
-// modal, so bring the button in step here (otherwise it stays disabled until something else happens to re-render).
-function syncSubmitButtonState() {
-  document.querySelectorAll(".modal button.btn-primary").forEach((btn) => {
-    const handler = btn.getAttribute("onclick") || "";
-    if (handler.indexOf("startGenerationMulti") !== -1) btn.disabled = !canSubmitMulti();
-    else if (handler.indexOf("startGeneration()") !== -1) btn.disabled = !canSubmit();
-  });
+
+// enablePromptFieldInPlace's in-place mutation above deliberately never
+// calls renderModal() (that's the whole point -- see its own comment),
+// but the submit button's disabled attribute depends on the exact same
+// loadingDefault(ByType)/prompt state that mutation just changed, and a
+// plain DOM attribute isn't reactive -- nothing else repaints it. The
+// single-type path usually gets away with this by accident (selectVideoType
+// immediately chains into loadModalOverlayFamilies() right after
+// refillPromptDefault(), which still does a full render and incidentally
+// fixes the button) -- but the checkbox multi-select path
+// (onVideoTypeToggle) awaits loadModalOverlayFamilies() BEFORE
+// loadPromptDefaultFor(), so by the time a later-checked type's prompt
+// resolves, nothing is left to trigger that accidental fix. Confirmed
+// live: the button stayed stuck disabled indefinitely there, since
+// nothing else happens to touch the modal afterward. Called after EVERY
+// loadingDefault(ByType) change (both the enablePromptFieldInPlace success
+// path and the renderModal() fallback -- the latter already reflects the
+// right state from its own fresh render, so re-syncing is a harmless no-op
+// there) so the button is always correct regardless of which path ran.
+function syncSubmitButtons() {
+  const single = document.getElementById("submitBtn");
+  if (single) single.disabled = !canSubmit();
+  const multiTop = document.getElementById("submitMultiTopBtn");
+  if (multiTop) multiTop.disabled = !canSubmitMulti();
+  const multiBottom = document.getElementById("submitMultiBtn");
+  if (multiBottom) multiBottom.disabled = !canSubmitMulti();
 }
 
 function onFieldChange(field, value) {
@@ -1990,6 +2009,7 @@ function skipPreview() { commitCurrent({}); }
 // 1, unordered) -- maxSelect is what the rest of this step's selection/
 // drag/badge/confirm logic branches on.
 async function enterStillsSelection() {
+  const owner = modal; // the modal may be closed or replaced while the photos load
   modal.step = "selecting-stills";
   modal.pool = []; modal.selectedIds = []; modal.poolError = null;
   modal.maxSelect = isImageTransitionCurrent() ? 4 : 1;
@@ -1998,6 +2018,7 @@ async function enterStillsSelection() {
   try {
     const res = await fetch(apiUrl("/api/product-images/" + encodeURIComponent(modal.tag)));
     const body = await res.json();
+    if (modal !== owner) return;
     if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
     // Only the first 4 by default -- a merchant with a large photo
     // library shouldn't have to scroll past a dozen+ tiles just to
@@ -2007,6 +2028,7 @@ async function enterStillsSelection() {
     // back whatever isn't already in the pool).
     modal.pool = (body.images || []).slice(0, 4).map((img, i) => ({ ...img, id: "real:" + i }));
   } catch (err) {
+    if (modal !== owner) return;
     modal.poolError = err.message || "Couldn't load this product's photos.";
   }
   modal.loadingPool = false;
@@ -2022,6 +2044,7 @@ async function enterStillsSelection() {
 // discard-and-replace behavior, and keeps the pool from growing
 // unbounded across repeated clicks.
 async function generateStillsBatch() {
+  const owner = modal;
   const current = modal.queue[modal.queueIndex];
   modal.generatingStills = true; modal.poolError = null;
   renderModal();
@@ -2031,6 +2054,7 @@ async function generateStillsBatch() {
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: current.videoType, prompt: current.prompt, aspectRatio: current.aspectRatio }),
     });
     const body = await res.json();
+    if (modal !== owner) return;
     if (!res.ok || body.error) throw new Error(body.error || "Could not generate images");
     // Same candidates-version carry-through as the old flow -- advances
     // this version at commitCurrent time instead of allocating a fresh one.
@@ -2041,6 +2065,7 @@ async function generateStillsBatch() {
     (body.images || []).forEach((img, i) => modal.pool.push({ url: img.url, source: "ai", id: "ai:" + stamp + ":" + i }));
   } catch (err) {
     console.error("Generating stills failed:", err.message);
+    if (modal !== owner) return;
     modal.poolError = "Couldn't generate images. Try again, or contact support if this keeps happening.";
   }
   modal.generatingStills = false;
@@ -2091,6 +2116,7 @@ function onStillDrop(e, targetId) {
 // original load) since an "Upload Image" click earlier in this same
 // session may have added new photos to the product since then.
 async function onChangeImageClick(id) {
+  const owner = modal;
   modal.changeImageTileId = id;
   modal.otherRealImages = [];
   modal.loadingOtherImages = true;
@@ -2098,10 +2124,12 @@ async function onChangeImageClick(id) {
   try {
     const res = await fetch(apiUrl("/api/product-images/" + encodeURIComponent(modal.tag)));
     const body = await res.json();
+    if (modal !== owner) return;
     if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
     const poolUrls = new Set(modal.pool.map((p) => p.url));
     modal.otherRealImages = (body.images || []).filter((img) => !poolUrls.has(img.url)); // { url, displayUrl }
   } catch {
+    if (modal !== owner) return;
     modal.otherRealImages = [];
   }
   modal.loadingOtherImages = false;
@@ -2134,6 +2162,7 @@ async function onStillFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ""; // allow picking the same file again later
   if (!file) return;
+  const owner = modal;
   const tile = { id: "upload:" + Date.now(), source: "real", url: "", uploading: true };
   modal.pool.push(tile);
   modal.uploadingNewTile = true;
@@ -2144,6 +2173,7 @@ async function onStillFileSelected(event) {
       { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }
     );
     const body = await res.json();
+    if (modal !== owner) return;
     if (!res.ok) throw new Error(body.error || "Upload failed");
     // The adapter hosts the upload itself (a signed link the video engine can fetch); the store's own gallery is not touched.
     tile.url = body.url;
@@ -2153,6 +2183,7 @@ async function onStillFileSelected(event) {
     // The placeholder tile never got a real image -- drop it rather
     // than leave a permanently-broken tile in the pool, and surface the
     // failure the same way generateStillsBatch's own errors show.
+    if (modal !== owner) return;
     modal.pool = modal.pool.filter((p) => p.id !== tile.id);
     modal.poolError = err.message || "Couldn't upload this image.";
   }
@@ -2615,14 +2646,14 @@ function renderModal() {
         singleTypeFieldsHtml() +
       '</div><div class="modal-actions">' +
         '<button class="btn-text" onclick="cancelModal()">Cancel</button>' +
-        '<button class="btn-primary" ' + (canSubmit() ? '' : 'disabled') + ' onclick="startGeneration()">' + submitLabel() + '</button>' +
+        '<button class="btn-primary" id="submitBtn" ' + (canSubmit() ? '' : 'disabled') + ' onclick="startGeneration()">' + submitLabel() + '</button>' +
       '</div>';
     } else {
       // The checkbox multi-select path -- list-row quick-generate and
       // "Generate another video", where the type isn't known yet.
       const count = modal.videoTypes.length;
       const topAction = count > 1
-        ? '<div class="modal-top-action"><button class="btn-primary" ' + (canSubmitMulti() ? '' : 'disabled') + ' onclick="startGenerationMulti()">Generate ' + count + ' Videos</button></div>'
+        ? '<div class="modal-top-action"><button class="btn-primary" id="submitMultiTopBtn" ' + (canSubmitMulti() ? '' : 'disabled') + ' onclick="startGenerationMulti()">Generate ' + count + ' Videos</button></div>'
         : "";
       body = '<div class="modal-header">Generate video' + (count > 1 ? 's' : '') + '</div><div class="modal-body">' +
         topAction +
@@ -2630,7 +2661,7 @@ function renderModal() {
         multiTypeFieldsHtml() +
       '</div><div class="modal-actions">' +
         '<button class="btn-text" onclick="cancelModal()">Cancel</button>' +
-        (count === 1 ? '<button class="btn-primary" ' + (canSubmitMulti() ? '' : 'disabled') + ' onclick="startGenerationMulti()">Generate Video</button>' : '') +
+        (count === 1 ? '<button class="btn-primary" id="submitMultiBtn" ' + (canSubmitMulti() ? '' : 'disabled') + ' onclick="startGenerationMulti()">Generate Video</button>' : '') +
       '</div>';
     }
   } else if (modal.step === "loading-preview") {
