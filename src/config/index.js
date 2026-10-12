@@ -1,8 +1,6 @@
 // Single place where environment variables are read.
 require("dotenv").config();
 
-const magentoBaseUrl = String(process.env.MAGENTO_BASE_URL || "").replace(/\/+$/, "");
-
 module.exports = {
   port: process.env.PORT || 4200,
   // Public address of this service: used in payment return URLs and links in invoices.
@@ -64,12 +62,9 @@ module.exports = {
     tenantId: process.env.FLIPICK_TENANT_ID,
     retailerName: process.env.RETAILER_NAME,
   },
-  // Default Magento connection of the pre-multi-tenant setup; only used to create the first "internal" installation.
-  legacyMagento: {
-    baseUrl: magentoBaseUrl,
-    accessToken: process.env.MAGENTO_ACCESS_TOKEN,
+  // Magento catalogue: the product attribute whose option labels name a product's category (default for every store; a store can
+  // override it in its own settings). Each merchant's Magento address and access token come from the Connect step, not from here.
+  catalog: {
     categoryAttributeCode: process.env.MAGENTO_CATEGORY_ATTRIBUTE_CODE || "product_type",
-    mediaBaseUrl: String(process.env.MAGENTO_MEDIA_BASE_URL || magentoBaseUrl).replace(/\/+$/, ""),
-    currencyCode: process.env.MAGENTO_CURRENCY_CODE || "USD",
   },
 };

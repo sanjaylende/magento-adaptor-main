@@ -138,7 +138,7 @@ async function magentoConfigFor(installation, store) {
     baseUrl: installation.baseUrl,
     accessToken: installation.magentoToken,
     websiteId: store.externalId,
-    categoryAttributeCode: settings.categoryAttributeCode || config.legacyMagento.categoryAttributeCode,
+    categoryAttributeCode: settings.categoryAttributeCode || config.catalog.categoryAttributeCode,
     mediaBaseUrl: (settings.mediaBaseUrl || installation.baseUrl).replace(/\/+$/, ""),
     currencyCode: settings.currencyCode || store.baseCurrency,
   };

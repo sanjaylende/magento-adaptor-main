@@ -1,5 +1,5 @@
 // Currency formatting for prices shown in the adapter UI and baked into overlay text. Magento prices are denominated in the
-// store's base currency (MAGENTO_CURRENCY_CODE, default USD). An unmapped code falls back to prefixing the ISO code
+// store's base currency (read from each Magento website when it is connected). An unmapped code falls back to prefixing the ISO code
 // (e.g. "SEK 199.00") rather than guessing a symbol.
 //
 // Shared between server.js (Node side) and the browser (server.js injects this map into the page).

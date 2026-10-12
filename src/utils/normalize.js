@@ -8,8 +8,7 @@ function discountPercent(price, originalPrice) {
 // media_gallery_entries[].file is a relative path under Magento's product
 // media directory (e.g. "/m/y/shirt.jpg", meaning
 // pub/media/catalog/product/m/y/shirt.jpg on disk) -- build the public URL
-// against mediaBaseUrl (defaults to MAGENTO_BASE_URL, overridable via
-// MAGENTO_MEDIA_BASE_URL for a store behind a CDN). Returns every gallery
+// against mediaBaseUrl (the store's own address, unless the store's settings name a different media host, for example a CDN). Returns every gallery
 // image, not just the first, so the modal's source-image picker has all of
 // them to choose from -- pickImage (below) keeps returning just the first,
 // for callers that only ever wanted a single thumbnail.
