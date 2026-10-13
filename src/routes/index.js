@@ -21,7 +21,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const tenantAuth = require("../middleware/tenantAuth");
 const idempotent = require("../middleware/idempotency");
 const { validate, idempotencyKeyShape, limitBody } = require("../middleware/validate");
-const { perIp, perInstallation, perStore } = require("../middleware/rateLimit");
+const { perIp, perTenant, perInstallation, perStore } = require("../middleware/rateLimit");
 const { ipAllowList } = require("../middleware/ipAllowList");
 const config = require("../config");
 const generatedState = require("../services/generatedState");
@@ -63,7 +63,7 @@ router.post("/api/v1/uninstall", ...signedOnly, validate({ body: S.body.emptyish
 
 // ---- Everything below acts for one store (signed request or browser session) ----
 const forStore = express.Router();
-forStore.use(tenantAuth(), perInstallation(600), perStore("store", 300), idempotencyKeyShape, h(async (req, res, next) => { await generatedState.ensureLoaded(); next(); }));
+forStore.use(tenantAuth(), perTenant(600, "store", 300), idempotencyKeyShape, h(async (req, res, next) => { await generatedState.ensureLoaded(); next(); }));
 const expensive = perStore("expensive", 20);
 
 forStore.get("/bootstrap", h(bootstrap.bootstrap));
