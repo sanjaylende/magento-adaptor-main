@@ -9,9 +9,11 @@ const { STATUS } = require("../config/constants");
 
 const engine = () => ({ baseUrl: config.flipick.videoEngineBaseUrl, apiKey: config.flipick.videoEngineApiKey });
 
-// Re-signs every ready slot's URL (and persists the new URL so the next page load does not need to).
+// Re-signs the ready slots whose URL is close to expiring (isVideoUrlStale keeps an hour of margin) and persists the new URL so the next
+// page load does not need to. A URL that is still good is left alone: re-signing every ready video on every page load cost one engine
+// call and one database write per video per load.
 async function refreshGeneratedVideoUrls() {
-  const entries = Object.entries(generatedState.all()).filter(([, g]) => g.status === STATUS.READY && g.projectId);
+  const entries = Object.entries(generatedState.all()).filter(([, g]) => g.status === STATUS.READY && g.projectId && isVideoUrlStale(g.videoUrl));
   if (!entries.length) return;
   let results;
   try {
@@ -25,7 +27,8 @@ async function refreshGeneratedVideoUrls() {
     if (!result || result.error) continue;
     const updated = { ...g, videoUrl: result.videoUrl || g.videoUrl, thumbnailUrl: result.thumbnailUrl || g.thumbnailUrl };
     generatedState.set(key, updated);
-    if (g.currentVersionId) {
+    const changed = updated.videoUrl !== g.videoUrl || updated.thumbnailUrl !== g.thumbnailUrl;
+    if (changed && g.currentVersionId) {
       videoVersions
         .updateVersionAndMirror(g.currentVersionId, { videoUrl: updated.videoUrl, thumbnailUrl: updated.thumbnailUrl })
         .catch((err) => logger.error("Failed to persist refreshed URL for", key, "-", err.message));
@@ -35,7 +38,7 @@ async function refreshGeneratedVideoUrls() {
 
 // Mutates ready versions (that have an engine project) to carry fresh signed URLs. Failures are logged, not thrown.
 async function refreshVersionUrls(versions) {
-  const ready = versions.filter((v) => v.status === STATUS.READY && v.projectId);
+  const ready = versions.filter((v) => v.status === STATUS.READY && v.projectId && isVideoUrlStale(v.videoUrl));
   if (!ready.length) return;
   try {
     const results = await refreshProjectVideoUrls({ ...engine(), projectIds: [...new Set(ready.map((v) => v.projectId))] });
