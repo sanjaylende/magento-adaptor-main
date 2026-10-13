@@ -4,9 +4,12 @@ const { query, asSystem } = require("../db/connection");
 const logger = require("../utils/logger");
 
 const WINDOW_SECONDS = 60;
+// Load tests multiply every budget so the handlers, not the limiter, are what gets measured. Ignored in production, so the real limits cannot be loosened.
+const SCALE = process.env.NODE_ENV !== "production" && Number(process.env.RATE_LIMIT_SCALE) > 0 ? Number(process.env.RATE_LIMIT_SCALE) : 1;
 
 // bucketKey(req) -> string identifying who is being limited; limit = requests per window.
-function rateLimit({ name, limit, key }) {
+function rateLimit({ name, limit: baseLimit, key }) {
+  const limit = baseLimit * SCALE;
   return async (req, res, next) => {
     try {
       const who = key(req);
