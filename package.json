@@ -11,7 +11,8 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "db:up": "docker compose up -d db",
     "sbom": "npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-format JSON --output-file sbom.cdx.json",
-    "audit:prod": "npm audit --omit=dev --audit-level=high"
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "lint": "eslint ."
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -21,5 +22,9 @@
     "pg": "^8.23.1",
     "undici": "^8.11.2",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0"
   }
 }

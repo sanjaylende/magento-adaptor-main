@@ -1508,7 +1508,7 @@ async function loadOverlayPreview() {
   if (!family) { modal.loadingOverlayPreview = false; renderModalPreservingPrompt(); return; }
   modal.loadingOverlayPreview = true;
   renderModalPreservingPrompt();
-  let objectUrl = null;
+  let objectUrl;
   try {
     // uniqueTag lets the server substitute this product's own
     // price/MRP/name/category into the preview's declared fields (see
@@ -2808,7 +2808,7 @@ function renderModal() {
   if (newModalEl) newModalEl.scrollTop = prevScrollTop;
 
   if (focusAttr && focusValue) {
-    const placeholder = root.querySelector('[' + focusAttr + '="' + focusValue.replace(/"/g, '\"') + '"]');
+    const placeholder = root.querySelector('[' + focusAttr + '="' + focusValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
     if (placeholder && placeholder.tagName === active.tagName) {
       placeholder.replaceWith(active);
       active.focus();

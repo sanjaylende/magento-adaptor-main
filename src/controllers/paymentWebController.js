@@ -9,7 +9,7 @@ async function returnPage(req, res) {
   const gateway = req.query.gw || "icici";
   const params = req.method === "POST" ? { ...req.body } : { ...req.query };
   delete params.gw;
-  let title = "Payment status";
+  let title;
   let body;
   try {
     const { order } = await payments.handleReturn(gateway, params);

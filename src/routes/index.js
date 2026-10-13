@@ -47,8 +47,8 @@ router.get("/billing/return", perIp("pay-return", 60), validate({ query: S.query
 router.post("/billing/return", perIp("pay-return", 60), limitBody(16 * 1024), validate({ query: S.query.paymentReturn, body: S.body.gatewayMessage }), h(paymentWeb.returnPage));
 // The bank's server-to-server message: only ICICI's addresses once they are configured (ICICI_CALLBACK_ALLOWED_IPS).
 router.post("/api/payments/callback/:gateway", ipAllowList(() => config.payment.icici.callbackAllowedIps, "payment callback"), perIp("pay-callback", 120), limitBody(16 * 1024), validate({ params: S.params.gateway, body: S.body.gatewayMessage }), h(paymentWeb.callback));
-router.get("/invoice/:token", validate({ params: S.params.token }), h(invoice.show));
-router.get("/dl/:token", validate({ params: S.params.token }), h(download.download));
+router.get("/invoice/:token", perIp("invoice", 120), validate({ params: S.params.token }), h(invoice.show));
+router.get("/dl/:token", perIp("dl", 300), validate({ params: S.params.token }), h(download.download));
 router.get("/img/:token", perIp("img", 600), validate({ params: S.params.token }), h(image.show));
 // Photos uploaded in the stills picker, fetched by the video engine and the browser through a signed link.
 router.get("/up/:token", perIp("up", 600), validate({ params: S.params.token }), h(stills.serve));

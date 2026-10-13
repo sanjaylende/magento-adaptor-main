@@ -6,6 +6,7 @@
   const SESSION_KEY = "flipickSession";
 
   function showFatal(message) {
+    message = String(message).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
     document.getElementById("appRoot").innerHTML =
       '<div style="max-width:520px;margin:60px auto;text-align:center;font-family:system-ui,sans-serif">' +
       '<h2 style="margin:0 0 8px">Video Generator can\'t open</h2><p style="color:#5f5e5a">' + message + '</p></div>';

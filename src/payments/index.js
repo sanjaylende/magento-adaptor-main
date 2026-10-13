@@ -5,7 +5,7 @@ const gateways = {
 };
 
 function getGateway(name = "icici") {
-  if (!gateways[name]) throw new Error(`Unknown payment gateway "${name}"`);
+  if (!Object.hasOwn(gateways, name)) throw new Error(`Unknown payment gateway "${name}"`);
   return gateways[name]();
 }
 

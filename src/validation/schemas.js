@@ -5,10 +5,12 @@ const { VIDEO_TYPES } = require("../config/constants");
 
 const VIDEO_TYPE_KEYS = Object.keys(VIDEO_TYPES);
 const ASPECT_RATIOS = ["9:16", "16:9", "1:1", "5:4"];
+// eslint-disable-next-line no-control-regex -- rejecting control characters is the purpose of this check
 const noControlChars = (s) => !/[\u0000-\u001f\u007f]/.test(s);
 
 // ---- building blocks ----
 const text = (max, min = 0) => z.string().min(min).max(max).refine(noControlChars, "contains control characters");
+// eslint-disable-next-line no-control-regex -- rejecting control characters is the purpose of this check
 const multiline = (max) => z.string().max(max).refine((s) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s), "contains control characters");
 const httpUrl = (max = 2048) => z.string().max(max).refine((s) => { try { return ["http:", "https:"].includes(new URL(s).protocol); } catch (err) { return false; } }, "must be an http(s) address");
 const blankToUndefined = (schema) => z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional());

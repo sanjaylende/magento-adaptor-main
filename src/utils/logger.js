@@ -39,7 +39,7 @@ function redact(value, depth = 0) {
   if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1));
   if (typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = /^installKey$/i.test(k) && typeof v === "string" ? scrub(v) : SENSITIVE.test(k) ? "[redacted]" : redact(v, depth + 1);
+    for (const [k, v] of Object.entries(value)) if (k !== "__proto__") out[k] = /^installKey$/i.test(k) && typeof v === "string" ? scrub(v) : SENSITIVE.test(k) ? "[redacted]" : redact(v, depth + 1);
     return out;
   }
   return typeof value === "string" ? scrub(value) : value;
