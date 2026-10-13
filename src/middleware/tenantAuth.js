@@ -51,9 +51,10 @@ async function fromSession(req) {
   const token = (req.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   const claims = verifyToken(token);
   if (!claims || claims.typ !== "session") return { status: 401, message: "Session expired. Reopen Video Generator from the Magento admin." };
-  const installation = await tenants.getInstallation(claims.inst);
+  // The store the session names is read together with the installation (one statement instead of two).
+  const { installation, store } = claims.web != null ? await tenants.getInstallationAndStore(claims.inst, claims.web) : { installation: await tenants.getInstallation(claims.inst), store: null };
   if (!installation || installation.status !== "active") return { status: 403, message: "Installation is not active" };
-  return { installation, websiteId: claims.web };
+  return { installation, websiteId: claims.web, store, storeRead: claims.web != null };
 }
 
 // Resolves { installation, store } for the request, or answers with an error.
@@ -68,7 +69,7 @@ function tenantAuth({ requireStore = true } = {}) {
       req.authKind = bearer ? "session" : "signature";
       if (!requireStore) return next();
 
-      const store = websiteId != null ? await tenants.getStore(installation.id, websiteId) : null;
+      const store = result.storeRead ? result.store : (websiteId != null ? await tenants.getStore(installation.id, websiteId) : null);
       if (!store || store.status !== "active") return fail(res, 404, "Unknown store for this installation", req);
       req.store = store;
       const magento = await tenants.magentoConfigFor(installation, store);

@@ -52,6 +52,25 @@ async function getInstallation(id) {
   return row ? mapInstallation(row) : null;
 }
 
+// The installation and the store a browser session names, in ONE statement: every browser request needs both, and they used to cost two round trips.
+// The result is what getInstallation(id) and getStore(id, externalId) return separately.
+async function getInstallationAndStore(id, externalId) {
+  const { rows: [row] } = await query(
+    `SELECT i.*, s.id AS store_id, s.installation_id AS store_installation_id, s.external_id AS store_external_id, s.code AS store_code,
+            s.name AS store_name, s.base_currency AS store_base_currency, s.status AS store_status
+       FROM installations i
+       LEFT JOIN stores s ON s.installation_id = i.id AND s.external_id = $2
+      WHERE i.id = $1`,
+    [id, String(externalId)]
+  );
+  if (!row) return { installation: null, store: null };
+  const store = row.store_id == null ? null : mapStore({
+    id: row.store_id, installation_id: row.store_installation_id, external_id: row.store_external_id, code: row.store_code,
+    name: row.store_name, base_currency: row.store_base_currency, status: row.store_status,
+  });
+  return { installation: mapInstallation(row), store };
+}
+
 async function getStore(installationId, externalId) {
   const { rows: [row] } = await query("SELECT * FROM stores WHERE installation_id = $1 AND external_id = $2", [installationId, String(externalId)]);
   return row ? mapStore(row) : null;
@@ -160,6 +179,6 @@ async function getStoreSettings(storeId) {
 }
 
 module.exports = {
-  httpError, getInstallationByKey, getInstallation, getStore, getStoreById, listStores, syncStores,
+  httpError, getInstallationByKey, getInstallation, getInstallationAndStore, getStore, getStoreById, listStores, syncStores,
   registerInstallation, touchInstallation, markUninstalled, magentoConfigFor, getStoreSettings,
 };
