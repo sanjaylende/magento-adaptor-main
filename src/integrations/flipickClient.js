@@ -21,7 +21,7 @@ const VVP_ENDPOINT = "/api/v1/vvp-generation/generate";
 //    whatever already exists for that (theme, category, name) triple.
 const { loggedFetch } = require("../utils/httpLog");
 
-async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayFamily, noOverlay, externalRef, variantName, theme, category, name, values, forceNewProject, brandId, startImageUrl, aspectRatio, source, promptIsFinal }) {
+async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayFamily, noOverlay, externalRef, variantName, theme, category, name, values, forceNewProject, brandId, retailerName, startImageUrl, aspectRatio, source, promptIsFinal }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
   if (!tenantId) throw new Error("tenantId is required");
   if (!externalRef) throw new Error("externalRef is required");
@@ -48,6 +48,9 @@ async function generateVvpVideo({ baseUrl, apiKey, tenantId, projectId, overlayF
     // Only used when actually creating a new base video — a reused one
     // keeps whatever brand/start frame it was first created with.
     brand_id: brandId || undefined,
+    // brand_name is the real path today: same resolveBrandId the engine's family listing/generate routes use, so a
+    // brand-scoped Overlay Family (a tenant's own) can actually be generated with here, not just previewed.
+    brand_name: retailerName || undefined,
     start_image_url: startImageUrl || undefined,
     // Only takes effect when actually creating a new base video -- a reused
     // one keeps whatever aspect ratio it was first created with, same as

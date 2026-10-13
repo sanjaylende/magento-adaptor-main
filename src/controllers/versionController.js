@@ -104,7 +104,8 @@ async function discardCandidates(req, res) {
       await videoVersions.deleteSlot(uniqueTag, videoType);
       generatedState.remove(key);
     }
-    res.json({ ok: true });
+    // The slot's resulting display state, so the client updates in place without a /api/status round-trip.
+    res.json({ ok: true, current: generatedState.get(key) || null });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

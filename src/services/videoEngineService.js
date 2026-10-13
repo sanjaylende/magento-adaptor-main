@@ -220,6 +220,7 @@ async function generateVideo(product, { videoType, mode = "regenerate", prompt, 
     name: product.name,
     values: overlay,
     brandId,
+    retailerName: options.retailerName,
     startImageUrl,
     aspectRatio,
     // Optional -- falls back to Flipick's photo-less scene when the product

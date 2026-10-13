@@ -1941,10 +1941,13 @@ function startGenerationMulti() {
 
 async function generatePreviewForCurrent() {
   const current = modal.queue[modal.queueIndex];
-  // Neither Image Transitions nor Hero Product auto-generates AI stills
-  // on entry anymore -- both show the product's own real photos first
-  // and let the merchant opt into AI generation via "Generate Images"
-  // (see enterStillsSelection/generateStillsBatch). Lifestyle is
+  // Image Transitions and Hero Product both show the product's own real
+  // photos AND kick off a first AI batch at the same time (see
+  // enterStillsSelection -- loadRealProductPhotos/generateStillsBatch run
+  // in parallel, each rendering its own section as it settles), so the
+  // merchant has a full pool to pick from without an extra click; the
+  // "Generate/Regenerate Images" button (generateStillsBatch) stays
+  // available for getting a different AI batch afterward. Lifestyle is
   // unaffected -- it keeps the old auto-generate-4-candidates flow
   // below, since it never required a reference image at all. Branching
   // here (rather than at startGeneration/startGenerationMulti's call
@@ -1997,19 +2000,29 @@ function retryPreview() { generatePreviewForCurrent(); }
 function selectImage(url) { commitCurrent({ startImageUrl: url }); }
 function skipPreview() { commitCurrent({}); }
 
-// The combined pool: the product's own real photos (loaded here
-// immediately, no AI call yet) plus whatever AI stills the merchant
-// generates on top via generateStillsBatch below. Shared by Image
-// Transitions (pick exactly 4, ordered) and Hero Product (pick at most
-// 1, unordered) -- maxSelect is what the rest of this step's selection/
-// drag/badge/confirm logic branches on.
+// The combined pool: the product's own real photos plus AI stills --
+// both load at the same time (see loadRealProductPhotos/
+// generateStillsBatch below), each independently rendering its own
+// section as soon as it settles rather than one waiting on the other.
+// Shared by Image Transitions (pick exactly 4, ordered) and Hero Product
+// (pick at most 1, unordered) -- maxSelect is what the rest of this
+// step's selection/drag/badge/confirm logic branches on.
 async function enterStillsSelection() {
-  const owner = modal; // the modal may be closed or replaced while the photos load
   modal.step = "selecting-stills";
   modal.pool = []; modal.selectedIds = []; modal.poolError = null;
   modal.maxSelect = isImageTransitionCurrent() ? 4 : 1;
   modal.loadingPool = true;
   renderModal();
+  loadRealProductPhotos();
+  generateStillsBatch();
+}
+
+// Real photos, loaded alongside the first AI batch (see
+// enterStillsSelection) -- filters by source rather than overwriting
+// modal.pool outright, since generateStillsBatch's own AI tiles may land
+// in modal.pool before or after this does.
+async function loadRealProductPhotos() {
+  const owner = modal; // the modal may be closed or replaced while the photos load
   try {
     const res = await fetch(apiUrl("/api/product-images/" + encodeURIComponent(modal.tag)));
     const body = await res.json();
@@ -2021,23 +2034,25 @@ async function enterStillsSelection() {
     // photos beyond these 4 are still reachable per-tile via Change
     // Image (onChangeImageClick re-fetches the full list and offers
     // back whatever isn't already in the pool).
-    modal.pool = (body.images || []).slice(0, 4).map((img, i) => ({ ...img, id: "real:" + i }));
+    const realTiles = (body.images || []).slice(0, 4).map((img, i) => ({ ...img, id: "real:" + i }));
+    modal.pool = modal.pool.filter((p) => p.source !== "real").concat(realTiles);
   } catch (err) {
     if (modal !== owner) return;
     modal.poolError = err.message || "Couldn't load this product's photos.";
   }
   modal.loadingPool = false;
-  renderModal();
+  renderStillsPool();
 }
 
-// "Generate Images"/"Regenerate Images" -- the only remaining call site
-// for /api/preview-images on either type that reaches this step (same
-// single-reference-image payload as before this feature; the backend
-// already branches hero_product's creative_brief vs image_transition's
-// theme internally). Regenerate REPLACES the previous AI batch rather
-// than adding to it -- mirrors the old "Regenerate these 4"
-// discard-and-replace behavior, and keeps the pool from growing
-// unbounded across repeated clicks.
+// The only call site for /api/preview-images on either type that reaches
+// this step (same single-reference-image payload as before this feature;
+// the backend already branches hero_product's creative_brief vs
+// image_transition's theme internally) -- fired automatically by
+// enterStillsSelection for the first batch, and again on a manual
+// "Generate Images"/"Regenerate Images" click afterward. Regenerate
+// REPLACES the previous AI batch rather than adding to it -- mirrors the
+// old "Regenerate these 4" discard-and-replace behavior, and keeps the
+// pool from growing unbounded across repeated clicks.
 async function generateStillsBatch() {
   const owner = modal;
   const current = modal.queue[modal.queueIndex];
@@ -2278,10 +2293,22 @@ function productImagesGridHtml() {
 }
 
 // The whole section (caption + grid) is swapped in/out together via its
-// own id (see renderStillsPool's outerHTML replacement) -- hidden
-// entirely until the merchant's first "Generate Images" click, so there's
-// no empty captioned box before any AI stills exist yet.
+// own id (see renderStillsPool's outerHTML replacement). While a batch is
+// in flight (the automatic first one from enterStillsSelection, or a
+// later manual Regenerate) this shows loading-placeholder tiles instead
+// of whatever AI tiles currently exist, since generateStillsBatch
+// replaces the previous batch wholesale rather than adding to it --
+// hidden entirely only in the brief window before any batch has ever
+// been requested, so there's no empty captioned box before that.
 function generatedImagesSectionHtml() {
+  if (modal.generatingStills) {
+    return '<div id="generatedImagesSection">' +
+      '<p class="field-hint" style="margin:10px 0 4px">Generated Images:</p>' +
+      '<div class="preview-grid wide">' +
+        '<div class="preview-tile uploading-tile"><div class="spinner"></div></div>'.repeat(4) +
+      '</div>' +
+    '</div>';
+  }
   const aiTiles = modal.pool.filter((p) => p.source === "ai");
   if (!aiTiles.length) return '<div id="generatedImagesSection"></div>';
   return '<div id="generatedImagesSection">' +
@@ -2476,7 +2503,34 @@ function closeModal() {
 function cancelModal() {
   const wasQuickGenerate = modal && modal.quickGenerate;
   const tag = modal && modal.tag;
+  // Checked against the live generated[] state for every video type on this product -- not just whatever THIS modal
+  // session touched. A slot can be stuck on 'candidates' with no video (an abandoned earlier session, a dropped request,
+  // a server restart mid-flow); canceling out of ANY modal for this product is a low-friction moment to self-heal all
+  // of them back to their last real version.
+  const pending = [];
+  if (tag) {
+    VIDEO_TYPES.forEach((videoType) => {
+      const gen = generated[genKey(tag, videoType)];
+      if (gen && gen.status === "candidates" && gen.currentVersionId) pending.push({ videoType, versionId: gen.currentVersionId });
+    });
+  }
   closeModal();
+  pending.forEach(({ videoType, versionId }) => {
+    const key = genKey(tag, videoType);
+    fetch(apiUrl("/api/generated/" + encodeURIComponent(tag) + "/" + encodeURIComponent(videoType) + "/discard-candidates"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId }),
+    })
+      .then((res) => res.json().catch(() => ({})))
+      .then((body) => {
+        if (body.current) generated[key] = body.current;
+        else delete generated[key];
+        renderAfterStateChange();
+      })
+      // Best-effort -- a failed discard just leaves the slot showing "candidates" until the next Refresh/page load
+      // re-syncs it from the database.
+      .catch(() => {});
+  });
   if (wasQuickGenerate && tag && VIDEO_TYPES.every((t) => !generated[genKey(tag, t)])) {
     navigate({ mode: "list" });
   }
