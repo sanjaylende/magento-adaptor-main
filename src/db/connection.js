@@ -58,10 +58,18 @@ async function applyContext(client, ctx) {
   client.tenantContextKey = key;
 }
 
+// One connection runs one statement at a time. pg 8 warns when a second one is started before the first has finished (and pg 9 refuses), which
+// is what Promise.all over queries of one transaction does. Statements of a transaction are therefore queued here, in the order they were started.
+function onClient(client, sql, params) {
+  const run = (client.flipickQueue || Promise.resolve()).then(() => client.query(sql, params));
+  client.flipickQueue = run.catch(() => {});
+  return run;
+}
+
 // Runs a single statement (or reuses the open transaction's connection).
 async function query(sql, params = []) {
   const ctx = als.getStore() || {};
-  if (ctx.client) return ctx.client.query(sql, params);
+  if (ctx.client) return onClient(ctx.client, sql, params);
   const client = await pool().connect();
   try {
     await applyContext(client, ctx);
@@ -80,10 +88,10 @@ async function tx(fn) {
     await applyContext(client, ctx);
     await client.query("BEGIN");
     const result = await als.run({ ...ctx, client }, fn);
-    await client.query("COMMIT");
+    await onClient(client, "COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK").catch((rollbackErr) => logger.warn("ROLLBACK failed", { error: rollbackErr.message }));
+    await onClient(client, "ROLLBACK").catch((rollbackErr) => logger.warn("ROLLBACK failed", { error: rollbackErr.message }));
     throw err;
   } finally {
     client.release();

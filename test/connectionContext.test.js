@@ -70,3 +70,26 @@ test("a transaction writes its context before BEGIN and joins nested calls", asy
   const order = log.map((l) => (/set_config/.test(l.sql) ? "ctx" : l.sql));
   assert.deepEqual(order, ["ctx", "BEGIN", "SELECT 1", "SELECT 2", "COMMIT"]);
 });
+
+test("queries started together inside one transaction run one after another on the connection", async () => {
+  const { db, restore } = (() => {
+    const state = { running: 0, maxRunning: 0 };
+    class Client {
+      async query(sql) { state.running++; state.maxRunning = Math.max(state.maxRunning, state.running); await new Promise((r) => setTimeout(r, 5)); state.running--; return { rows: [], rowCount: 0 }; }
+      release() {}
+    }
+    class Pool { on() {} async connect() { return new Client(); } async end() {} }
+    const pgPath = require.resolve("pg");
+    const connPath = require.resolve("../src/db/connection");
+    const oldPg = require.cache[pgPath];
+    require.cache[pgPath] = { id: pgPath, filename: pgPath, loaded: true, exports: { Pool, types: { setTypeParser() {} } } };
+    delete require.cache[connPath];
+    const db = require("../src/db/connection");
+    db.state = state;
+    return { db, restore: () => { delete require.cache[connPath]; if (oldPg) require.cache[pgPath] = oldPg; else delete require.cache[pgPath]; } };
+  })();
+  await db.withStore(3, () => db.tx(async () => { await Promise.all([db.query("SELECT 1"), db.query("SELECT 2"), db.query("SELECT 3")]); }));
+  const max = db.state.maxRunning;
+  restore();
+  assert.equal(max, 1, "pg 8 only warns about overlapping queries on one client; pg 9 will refuse them");
+});
