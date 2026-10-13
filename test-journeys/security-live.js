@@ -11,7 +11,7 @@ const adminUsers = require("../src/services/adminUserService");
 const BASE = (process.argv[2] || "http://localhost:4200").replace(/\/+$/, "");
 const results = [];
 const check = (name, pass, detail = "") => { results.push({ name, pass: !!pass, detail }); console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  [${detail}]` : ""}`); };
-const psql = (sql) => execFileSync("docker", ["exec", "-i", "magento-adaptor-db-1", "psql", "-U", "adapter_owner", "-d", "magento_adapter", "-At"], { input: sql, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" } }).trim();
+const psql = (sql) => execFileSync("docker", ["exec", "-i", "magento-adaptor-db-1", "psql", "-U", "adapter_owner", "-d", process.env.QA_DB || "magento_adapter", "-At"], { input: sql, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" } }).trim();
 const post = (path, body, headers = {}) => fetch(BASE + path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 const form = (path, fields, cookie) => fetch(BASE + path, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", ...(cookie ? { Cookie: cookie } : {}) }, body: new URLSearchParams(fields) });
 const cookieOf = (res, name) => (res.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith(`${name}=`)) || "");
