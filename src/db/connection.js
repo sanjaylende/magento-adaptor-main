@@ -45,11 +45,17 @@ function migrationPool() {
   return adminPool;
 }
 
+// The settings are session-level, so a pooled connection keeps them until they are changed. The context a connection currently carries is
+// remembered on it, and a statement for the same tenant skips the extra round trip. ANY change is written, including a change to "no
+// tenant" (a statement outside every context must see no tenant rows), so a connection can never serve the wrong tenant.
 async function applyContext(client, ctx) {
-  await client.query("SELECT set_config('app.store_id', $1, false), set_config('app.bypass', $2, false)", [
-    ctx.storeId ? String(ctx.storeId) : "",
-    ctx.bypass ? "on" : "",
-  ]);
+  const storeId = ctx.storeId ? String(ctx.storeId) : "";
+  const bypass = ctx.bypass ? "on" : "";
+  const key = storeId + "|" + bypass;
+  if (client.tenantContextKey === key) return;
+  client.tenantContextKey = undefined; // unknown until the statement below has succeeded
+  await client.query("SELECT set_config('app.store_id', $1, false), set_config('app.bypass', $2, false)", [storeId, bypass]);
+  client.tenantContextKey = key;
 }
 
 // Runs a single statement (or reuses the open transaction's connection).
