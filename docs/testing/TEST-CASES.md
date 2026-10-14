@@ -34,7 +34,7 @@ or report (environment variable *names* only).
 | T7 Overlay | | automated (render check Blocked) | | automated (render check Blocked) | case `video` |
 | T8 Uploaded images, bad files | | automated | | automated | case `video` |
 | T9 Free plan limits | | automated | | automated | case `subscriptions` |
-| T10 Security regression | php lint + compat | automated | php lint + load tests | automated | case `security`, `npm test`, `npm run lint`, `tests/regression/run.sh` |
+| T10 Security regression | php lint + compat | automated | php lint + load tests | automated | cases `security` and `sqli`, `npm test`, `npm run lint`, `tests/regression/run.sh` |
 | T11 UI consistency | | automated (Chrome, Firefox, desktop, phone) | | automated | case `ui` + screenshot review |
 | T12 Uninstall and reinstall | store script | store script | store script | store script | `scripts/ui/*-stores.js` |
 | T13 Load and 30-minute soak | | automated | | automated | cases `perf` and `soak` |
@@ -101,6 +101,7 @@ no sign-in -> 401; unknown product -> 404; an uploaded picture used as frame 1 a
 ## T10 Security regression
 
 1. Case `security`: the repo's live security journey against the running adapter (bad signature, replayed nonce, timestamps, body size limits, unknown fields, prototype pollution, SSRF refusals, store isolation of orders and videos, staff lock-out and CSRF, rate limiting of sessions).
+1b. Case `sqli`: 644 requests with 14 SQL-injection payloads (path, query, body, headers, file name, sign-in forms, staff console) must give no 5xx, no database or code text, no sleep delay, no dropped table or deleted row, and no sign-in by a boolean payload. Review and findings: `docs/security/SQL-INJECTION-REVIEW.md`.
 2. `npm test` (all unit and end-to-end tests of the adapter, including the security tests) must stay green.
 3. `npm run lint` clean; `npm run audit:prod` no high findings.
 4. PHP repos: every file compiles; the extension is checked against the installed Magento's interfaces.
