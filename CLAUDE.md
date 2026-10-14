@@ -16,6 +16,8 @@ When the user says 'carry out testing', 'run the tests' or 'run regression', do 
 
 `scripts/run-all-tests.sh` exists in this repo as a wrapper that runs the workspace-root script `D:\Flipick-Video-Genertor\scripts\run-all-tests.sh` (all four components). `docs/testing` and `docs/performance` are in this repo (and combined in the workspace root).
 
+`scripts/run-all-tests.sh` exists in this repo as a wrapper that runs the workspace-root script `D:\Flipick-Video-Genertor\scripts\run-all-tests.sh` (all four components). `docs/testing` and `docs/performance` are in this repo (and combined in the workspace root).
+
 ## Rules that always apply
 - Test only on the local Docker instances and the throwaway test databases. Never touch production, never push to GitHub, no paid services, never print or store real secrets (use environment variable names only).
 - Do not change public routes, response shapes, webhooks, plan or pricing logic, and never weaken validation, rate limits, headers or signature checks to make something faster or to make a test pass.
