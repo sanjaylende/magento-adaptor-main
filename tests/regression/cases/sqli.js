@@ -20,7 +20,7 @@ module.exports = async function sqli({ stack, run, connectStore }) {
   let sent = 0;
   const send = async (label, method, path, { headers = {}, body, auth = true, raw } = {}) => {
     const t0 = Date.now();
-    let res, text = '';
+    let res, text;
     try {
       res = await fetch(stack.base + path, { method, redirect: 'manual', headers: { ...(auth ? c.auth : {}), ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: raw !== undefined ? raw : body !== undefined ? JSON.stringify(body) : undefined });
       text = await res.text();
