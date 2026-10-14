@@ -1,0 +1,71 @@
+{
+  "platform": "magento",
+  "measuredAt": "2026-10-13T13:17:40.341Z",
+  "seconds": 6,
+  "concurrency": 10,
+  "routes": {
+    "GET /api/bootstrap": {
+      "requests": 131,
+      "rps": 21.8,
+      "p50": 473.7,
+      "p95": 571.2,
+      "p99": 600.1,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET /api/products": {
+      "requests": 150,
+      "rps": 25,
+      "p50": 419,
+      "p95": 511.1,
+      "p99": 524.8,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET /api/billing/status": {
+      "requests": 851,
+      "rps": 141.8,
+      "p50": 66.4,
+      "p95": 102.8,
+      "p99": 156.6,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET /api/billing/history": {
+      "requests": 849,
+      "rps": 141.5,
+      "p50": 64.5,
+      "p95": 136.2,
+      "p99": 178,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET /api/status/:tag/:type": {
+      "requests": 1129,
+      "rps": 188.2,
+      "p50": 47.6,
+      "p95": 101.4,
+      "p99": 142.1,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET /api/overlay-families": {
+      "requests": 938,
+      "rps": 156.3,
+      "p50": 58.8,
+      "p95": 114.3,
+      "p99": 153.3,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "GET / (page)": {
+      "requests": 7585,
+      "rps": 1264.2,
+      "p50": 7.9,
+      "p95": 10.4,
+      "p99": 17.3,
+      "errors": 0,
+      "non2xx": 0
+    }
+  }
+}

@@ -6,7 +6,6 @@ const assert = require("node:assert/strict");
 function load({ stale, engineAnswer }) {
   const calls = { engine: [], persisted: [], set: [] };
   const stub = (rel, exports) => { const p = require.resolve(rel); require.cache[p] = { id: p, filename: p, loaded: true, exports }; return p; };
-  const keep = {};
   const target = require.resolve("../src/services/videoUrlService");
   const paths = {
     engine: stub("../src/integrations/videoEngineClient", {

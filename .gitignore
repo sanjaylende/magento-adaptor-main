@@ -150,3 +150,6 @@ vite.config.ts.timestamp-*
 data/
 sbom.cdx.json
 backups/
+
+# Regression suite output
+tests/regression/reports/
