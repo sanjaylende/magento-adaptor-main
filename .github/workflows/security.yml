@@ -91,4 +91,5 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           exit-code: "1"
+          version: v0.75.0 # the action's default (v0.65.0) was removed from GitHub releases, so the scanner could not be installed
           ignore-unfixed: true
