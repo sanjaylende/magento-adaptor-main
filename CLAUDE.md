@@ -25,3 +25,6 @@ When the user says 'carry out testing', 'run the tests' or 'run regression', do 
 - Do not change public routes, response shapes, webhooks, plan or pricing logic, and never weaken validation, rate limits, headers or signature checks to make something faster or to make a test pass.
 - Say "tested" or "faster" only for something that was run and measured; when something cannot be run here, report it as BLOCKED with the reason.
 - If a change could alter behaviour merchants rely on, stop and ask before making it.
+
+## Standing rules and agents
+The standing rules for all four projects are in `docs/STANDING-RULES.md` (copy in the workspace root: `STANDING-RULES.md`). Read them before any change and end every task with the report of its section 7. Use the agents for the repetitive parts: `security-reviewer`, `wp-plugin-compliance`, `magento-standards-checker`, `playwright-verifier`, `regression-runner`, `perf-auditor` (user-level, `~/.claude/agents/`; the table at the end of the rules says when to use which).
