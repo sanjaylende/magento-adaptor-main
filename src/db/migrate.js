@@ -30,6 +30,15 @@ function renderSql(sql, schema = config.database.schema, appRole = appRoleName()
     .replace(/\badapter_app\b/g, quoteIdent(appRole));
 }
 
+// Checksums are of the file with LF line endings, so a Windows checkout (CRLF) and a Linux one agree. A checksum recorded from the CRLF form or
+// from the raw file (by an earlier build, on a machine with CRLF) is accepted as well; new records always use the LF form.
+function checksumsOf(sql) {
+  const sha = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const canonical = sha(sql.replace(/\r\n/g, "\n"));
+  const lf = sql.replace(/\r\n/g, "\n");
+  return { canonical, accepted: new Set([canonical, sha(lf.replace(/\n/g, "\r\n")), sha(sql)]) };
+}
+
 // One run at a time per schema: two instances starting together (or a deploy step and a starting service) queue on this PostgreSQL advisory
 // lock instead of racing; the second one then finds everything applied. Session-level, so it is released if the process dies.
 const LOCK_CLASS = 0x464c4d47;
@@ -61,16 +70,16 @@ async function applyMigrations() {
   const applied = new Map((await pool.query("SELECT id, checksum FROM " + history)).rows.map((r) => [r.id, r.checksum]));
   for (const file of fs.readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort()) {
     const sql = fs.readFileSync(path.join(DIR, file), "utf8");
-    const checksum = crypto.createHash("sha256").update(sql).digest("hex");
+    const { canonical, accepted } = checksumsOf(sql);
     if (applied.has(file)) {
-      if (applied.get(file) !== checksum) throw new Error(`Migration ${file} was changed after it was applied`);
+      if (!accepted.has(applied.get(file))) throw new Error(`Migration ${file} was changed after it was applied`);
       continue;
     }
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query(renderSql(sql));
-      await client.query("INSERT INTO " + history + " (id, checksum) VALUES ($1, $2)", [file, checksum]);
+      await client.query("INSERT INTO " + history + " (id, checksum) VALUES ($1, $2)", [file, canonical]);
       await client.query("COMMIT");
       logger.info(`Applied migration ${file}`);
     } catch (err) {
@@ -110,8 +119,8 @@ async function migrationStatus() {
   for (const file of files) {
     const row = applied.get(file);
     if (!row) { pending.push(file); continue; }
-    const checksum = crypto.createHash("sha256").update(fs.readFileSync(path.join(DIR, file), "utf8")).digest("hex");
-    if (row.checksum !== checksum) changed.push(file);
+    const { accepted } = checksumsOf(fs.readFileSync(path.join(DIR, file), "utf8"));
+    if (!accepted.has(row.checksum)) changed.push(file);
   }
   return {
     schema,

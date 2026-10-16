@@ -155,3 +155,17 @@ test("RUN_MIGRATIONS_ON_START=false: the service refuses a database that is behi
   assert.equal(run("scripts/db/migrate.js").status, 0);
   assert.match(out(probe()), /UP-TO-DATE/);
 });
+
+test("line endings of a migration file never make it look changed (Windows checkout CRLF vs Linux LF)", async () => {
+  const crypto = require("crypto");
+  const text = fs.readFileSync(path.join(ROOT, "migrations", "001_tenancy.sql"), "utf8").replace(/\r\n/g, "\n");
+  const sha = (t) => crypto.createHash("sha256").update(t).digest("hex");
+  const original = (await superuser("SELECT checksum FROM " + SCHEMA + ".schema_migrations WHERE id = '001_tenancy.sql'")).rows[0].checksum;
+  assert.equal(original, sha(text), "new records use the LF form");
+  for (const recorded of [sha(text), sha(text.replace(/\n/g, "\r\n"))]) { // recorded on a Linux machine, or from a CRLF file by an earlier build
+    await superuser("UPDATE " + SCHEMA + ".schema_migrations SET checksum = '" + recorded + "' WHERE id = '001_tenancy.sql'");
+    assert.equal(run("scripts/db/migrate.js").status, 0);
+    assert.equal(run("scripts/db/status.js", ["--exit-code"]).status, 0);
+  }
+  await superuser("UPDATE " + SCHEMA + ".schema_migrations SET checksum = '" + original + "' WHERE id = '001_tenancy.sql'");
+});
