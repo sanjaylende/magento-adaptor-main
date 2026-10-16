@@ -25,11 +25,12 @@ PostgreSQL row-level security enforces it (the service connects as a role withou
 ## Run locally
 
 ```
-docker compose up -d db          # PostgreSQL on 127.0.0.1:5434 (also started by D:\Magento-Vanilla\scripts\start-all.ps1)
-cp .env.example .env             # set ADAPTER_SECRET_KEY, ADMIN_BOOTSTRAP_EMAIL / PASSWORD, video engine keys
+# the database: schema magento_adapter in the shared PostgreSQL database ltx_1jnl (127.0.0.1:5432), created once by an administrator:
+DATABASE_SUPERUSER_URL=postgresql://<admin>@127.0.0.1:5432/ltx_1jnl npm run db:bootstrap
+cp .env.example .env             # set the role passwords, ADAPTER_SECRET_KEY, ADMIN_BOOTSTRAP_EMAIL / PASSWORD, video engine keys
 npm install
 npm start                        # migrations run automatically; http://localhost:4200
-npm test                         # needs the database above; creates and drops its own magento_adapter_test database
+npm test                         # creates and drops its own scratch database (magento_adapter_test) on the same server (TEST_DATABASE_SUPERUSER_URL, see docs/testing/HOW-TO-RUN.md)
 ```
 
 Staff console: `http://localhost:4200/admin` (first admin comes from `ADMIN_BOOTSTRAP_*`).
@@ -118,9 +119,28 @@ Written to the console and to `logs/app.log` (everything) and `logs/error.log` (
 process was down at 00:05 the old file is rotated at the next start. Settings: `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_ROTATE_AT`,
 `LOG_RETENTION_DAYS` (0 = keep all archives), `LOG_LEVEL`, `LOG_FORMAT`. Secrets are redacted.
 
+## Database
+
+The adapter keeps its data in its **own schema** (`DB_SCHEMA`, default `magento_adapter`) of the PostgreSQL database `ltx_1jnl`, next to
+`shopify_adapter`, `woocommerce_adapter` and the other applications' schemas, which it never reads or changes. Every connection is opened with
+`search_path` set to that schema, so nothing can fall back to `public`; the migration history (`schema_migrations`) is inside the schema.
+
+### Runbook: a clean install on local, stage or production (details: [db/README.md](db/README.md))
+
+1. **Once, by a database administrator:** `DATABASE_SUPERUSER_URL=postgresql://<admin>@<host>:5432/<database> npm run db:bootstrap` with `DATABASE_URL`, `DATABASE_ADMIN_URL` and `DB_SCHEMA` set to the two new roles' URLs (choose their passwords, keep them in a secret manager) and the schema name. Creates the schema and two least-privilege roles. Idempotent.
+2. **On every deploy:** `npm run db:migrate` (owner role, advisory lock, one transaction per migration, idempotent). Then start the service. With `RUN_MIGRATIONS_ON_START=true` (the default) the service does this itself when it starts; set it to `false` when a deploy step runs `db:migrate` and the service should only check that nothing is pending.
+3. **Check:** `npm run db:status` and `npm run db:verify -- --expect-empty-install` (drift in structure, roles, grants, isolation from other schemas; a clean install holds only the plan catalogue).
+4. Stage and production: `DB_SSL=require` (certificate verified, `DB_SSL_CA` for a private CA); never put the administrator URL in `.env`.
+
+- `scripts/db/provision.js` (`npm run db:bootstrap`): the bootstrap above.
+- `scripts/db/migrate.js` (`npm run db:migrate`): applies pending migrations (the service also does so at start-up unless `RUN_MIGRATIONS_ON_START=false`).
+- `scripts/db/move-data.js`: one-off, repeatable move from the old database (`SOURCE_DATABASE_URL`, read only): copies every table in one snapshot with primary keys and sequences preserved, refuses a non-empty target, then prints row counts and md5 checksums per table. `--verify-only` just compares. Stop the adapter while it runs.
+- `npm run db:status`, `npm run db:verify`, `npm run db:manifest`: see [db/README.md](db/README.md).
+- `DB_POOL_MAX` (default 8) keeps the service's share of the shared server's connections small.
+- Rollback: set `DATABASE_URL` / `DATABASE_ADMIN_URL` back to the old database (`docker compose up -d db`, port 5434) and `DB_SCHEMA=public`.
+
 ## Deploying
 
-Needs a public HTTPS address (`PUBLIC_BASE_URL`), managed PostgreSQL (create the `adapter_app` role as in
-`docker/db-init/01-app-role.sql`), `ADAPTER_SECRET_KEY` and the other secrets from the environment, and `NODE_ENV=production`
+Needs a public HTTPS address (`PUBLIC_BASE_URL`), managed PostgreSQL (create the schema and roles with `npm run db:bootstrap`, set `DB_SSL=require`), `ADAPTER_SECRET_KEY` and the other secrets from the environment, and `NODE_ENV=production`
 (which also blocks private-network store URLs at registration). Back up the database; the secret key is needed to read
 stored credentials.

@@ -1,5 +1,6 @@
-# Local PostgreSQL for the adapter (the production database is a managed Postgres; same schema).
-# Port 5434 avoids the Windows-installed Postgres servers on 5432/5433.
+# LEGACY / ROLLBACK ONLY. The adapter's data now lives in its own schema (magento_adapter) of the shared PostgreSQL database ltx_1jnl on
+# 127.0.0.1:5432 (see README, "Database"). This container is no longer needed day to day; start it only to roll back
+# (docker compose up -d db, then point DATABASE_URL / DATABASE_ADMIN_URL at 5434 and set DB_SCHEMA=public).
 name: magento-adaptor
 services:
   db:

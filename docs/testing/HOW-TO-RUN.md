@@ -3,7 +3,7 @@
 ## Prerequisites
 | Need | Used for | Check |
 |---|---|---|
-| Docker Desktop, running | adapter PostgreSQL (127.0.0.1:5434 Magento, 5435 WooCommerce), the WordPress and Magento test stores, PHP checks | `docker ps` |
+| Docker Desktop, running | adapter PostgreSQL (the Magento and WooCommerce adapters and their tests use the shared PostgreSQL service on 127.0.0.1:5432, where the tests create and drop a scratch database; set `TEST_DATABASE_SUPERUSER_URL` in the git-ignored `.env.test` if the administrator is not postgres/postgres), the WordPress and Magento test stores, PHP checks | `docker ps` |
 | Node.js 22 or newer (24 is fine) | the adapters and the regression suite | `node -v` |
 | PHP | not needed on the host: PHP checks run inside the store containers | `docker exec woocommerce-local-wordpress-1 php -v` |
 | ffmpeg and ffprobe on the PATH | the mock video engine renders real clips; the tests read colours and sizes from them | `ffmpeg -version` |
