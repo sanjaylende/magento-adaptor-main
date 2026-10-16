@@ -6,6 +6,7 @@ const productService = require("../services/productService");
 const { getProductAttributeOptions } = require("../services/catalogService");
 const { getPromptDefault } = require("../services/videoEngineService");
 const { refreshGeneratedVideoUrls } = require("../services/videoUrlService");
+const { discardAbandonedCandidates } = require("../services/candidateService");
 const generatedState = require("../services/generatedState");
 const { VIDEO_TYPES, STATUS } = require("../config/constants");
 
@@ -48,6 +49,7 @@ async function list(req, res) {
 async function refresh(req, res) {
   try {
     await productService.refreshProducts();
+    await discardAbandonedCandidates();
     await refreshGeneratedVideoUrls();
     res.json({ ok: true, count: productService.list().length });
   } catch (err) {

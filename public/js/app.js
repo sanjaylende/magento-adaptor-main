@@ -424,11 +424,20 @@ function renderPanel() {
   document.getElementById("genCount").textContent = cards.length;
   document.getElementById("panelEmpty").style.display = cards.length ? "none" : "block";
   cardsEl.innerHTML = cards.slice().reverse().map((g) => {
+    // slotStatus() is the same status mapping the product table's badges use (rendering/candidates/ready/published/failed/
+    // canceled). This card used to check only "generating"/"error" and assume "ready" for everything else, which labelled a
+    // real "candidates" or "canceled" slot "Generating…" although nothing was happening.
+    const status = slotStatus(g);
+    const isReadyLike = status === "ready" || status === "published";
     let media;
-    if (g.status === "generating") {
+    if (status === "rendering") {
       media = '<div class="spinner"></div>';
-    } else if (g.status === "error") {
+    } else if (status === "failed") {
       media = '<div class="panel-card-error">Generation failed. Try again, or contact support if this keeps happening.</div>';
+    } else if (status === "candidates") {
+      media = '<div class="panel-card-placeholder">Awaiting your pick from an earlier preview.</div>';
+    } else if (status === "canceled") {
+      media = '<div class="panel-card-placeholder">Generation canceled.</div>';
     } else {
       const thumbSrc = g.thumbnailUrl || "";
       // Thumbnail generation upstream occasionally fails silently while the
@@ -436,30 +445,34 @@ function renderPanel() {
       // link shows the plain placeholder background instead of a broken-image glyph.
       media = (thumbSrc ? '<img src="' + escapeHtml(thumbSrc) + '" alt="" onerror="this.style.display=\'none\'" />' : '') + '<div class="panel-card-play"></div>';
     }
-    const clickable = g.status === "ready"
+    const clickable = isReadyLike
       ? ' class="panel-card-media playable" data-video-url="' + escapeHtml(g.videoUrl) + '" data-video-title="' + escapeHtml(g.product.name) + '" data-aspect-ratio="' + escapeHtml(g.aspectRatio || "16:9") + '"'
       : ' class="panel-card-media"';
     const badge = g.videoType ? '<span class="video-type-badge ' + g.videoType + '">' + (TYPE_LABELS[g.videoType] || g.videoType) + '</span>' : '';
-    const downloadIconBtn = g.status === "ready"
+    const downloadIconBtn = isReadyLike
       ? '<a class="panel-card-icon-btn" href="javascript:void(0)" data-action="download-video" data-tag="' + escapeHtml(g.tag) + '" data-video-type="' + escapeHtml(g.videoType) + '" title="Download video">' + DOWNLOAD_ICON_SVG + '</a>'
       : '';
-    const deleteBtn = g.status !== "generating"
+    const deleteBtn = status !== "rendering"
       ? '<button type="button" class="panel-card-delete" data-action="delete-video" data-tag="' + escapeHtml(g.tag) + '" data-video-type="' + escapeHtml(g.videoType) + '" title="Delete video">' + TRASH_ICON_SVG + '</button>'
       : '';
-    const pushBtn = g.status === "ready"
+    const pushBtn = isReadyLike
       ? '<button type="button" class="action-btn" data-action="push-magento" data-tag="' + escapeHtml(g.tag) + '" data-video-type="' + escapeHtml(g.videoType) + '">' +
           (g.pushedToMagento ? "Update on product page" : "Add to product page") +
         '</button>'
       : '';
     const pushedNote = g.pushedToMagento ? '<div class="row-status">✓ Shown on the product page</div>' : '';
+    const footerLabel = {
+      rendering: "Generating…", failed: "Failed", candidates: "Awaiting your pick",
+      canceled: "Canceled", ready: "Ready — click to play", published: "Published — click to play",
+    }[status] || status;
     return '<div class="panel-card">' +
       '<div class="panel-card-header"><span>' + escapeHtml(g.product.name) + '</span>' + badge + '</div>' +
       '<div' + clickable + '>' + media + '</div>' +
       '<div class="panel-card-footer">' +
-        '<span>' + (g.status === "ready" ? "Ready — click to play" : g.status === "error" ? "Failed" : "Generating…") + '</span>' +
+        '<span>' + footerLabel + '</span>' +
         '<span>' + downloadIconBtn + deleteBtn + '</span>' +
       '</div>' +
-      (g.status === "ready" ? '<div class="panel-card-footer">' + pushBtn + pushedNote + '</div>' : '') +
+      (isReadyLike ? '<div class="panel-card-footer">' + pushBtn + pushedNote + '</div>' : '') +
     '</div>';
   }).join("");
 }
@@ -708,8 +721,12 @@ function renderDetailTabBody(product, slots) {
 
   const status = slotStatus(gen);
   let player;
-  if (gen.status === "generating") player = '<div class="detail-player"><div class="spinner"></div></div>';
-  else if (gen.status === "error") player = '<div class="detail-player-empty row-error">Generation failed. Try again, or contact support if this keeps happening.</div>';
+  // Previously only "generating"/"error" were checked and everything else was assumed "ready", which for a candidates/canceled
+  // slot tried to render <video src="null"> -- there is no video yet for either of those.
+  if (status === "rendering") player = '<div class="detail-player"><div class="spinner"></div></div>';
+  else if (status === "failed") player = '<div class="detail-player-empty row-error">Generation failed. Try again, or contact support if this keeps happening.</div>';
+  else if (status === "candidates") player = '<div class="detail-player-empty muted">Awaiting your pick from an earlier preview. Regenerate video to start a new one.</div>';
+  else if (status === "canceled") player = '<div class="detail-player-empty muted">Generation canceled.</div>';
   else player = '<div class="detail-player"><video src="' + escapeHtml(gen.videoUrl) + '" controls poster="' + escapeHtml(gen.thumbnailUrl || "") + '"></video></div>';
 
   const shareBtn = gen.status === "ready"
@@ -737,9 +754,9 @@ function renderDetailTabBody(product, slots) {
     ? '<button type="button" class="btn-text" data-action="open-versions" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + slot.type + '">Version history</button>'
     : "";
   const templateLine = gen.overlayFamily
-    ? '<p class="muted">Overlay: ' + escapeHtml(gen.overlayFamily) + '</p>'
+    ? '<p class="muted overlay-line">Overlay: ' + escapeHtml(gen.overlayFamily) + '</p>'
     : gen.templateName
-    ? '<p class="muted">Current template: ' + escapeHtml(gen.templateName) + '</p>'
+    ? '<p class="muted overlay-line">Current template: ' + escapeHtml(gen.templateName) + '</p>'
     : '';
 
   return '<div class="detail-player-title">' + label + versionSuffix + ' <span class="status-badge ' + status + '">' + status + '</span></div>' +
@@ -749,6 +766,8 @@ function renderDetailTabBody(product, slots) {
 }
 
 function renderVideoSlotList(product, slots) {
+  // The slot selectedSlot() resolves for the main player (includes the no-selection fallback) -- marks that card as "currently previewed".
+  const currentType = selectedSlot(slots).type;
   const cards = slots.map((s) => {
     const gen = s.gen;
     const status = slotStatus(gen);
@@ -757,17 +776,17 @@ function renderVideoSlotList(product, slots) {
       ? '<img src="' + escapeHtml(gen.thumbnailUrl) + '" class="slot-card-thumb" />'
       : '<div class="thumb-placeholder"></div>';
     const versionSuffix = gen && gen.versionNo ? ' · Version ' + gen.versionNo : '';
-    let body = "";
+    // Shown whenever the slot HAS an overlay/template, not only after expanding the card -- which overlay a video uses is
+    // relevant every time, not just on demand.
+    const templateLine = gen && gen.overlayFamily
+      ? '<p class="muted overlay-line">Overlay: ' + escapeHtml(gen.overlayFamily) + '</p>'
+      : gen && gen.templateName ? '<p class="muted overlay-line">Current template: ' + escapeHtml(gen.templateName) + '</p>' : "";
+    let body = templateLine ? '<div class="slot-card-body">' + templateLine + '</div>' : "";
     if (expanded && gen) {
       const errorLine = gen.status === "error" ? '<div class="row-error">Generation failed. Try again, or contact support if this keeps happening.</div>' : "";
-      const templateLine = gen.overlayFamily
-        ? '<p class="muted">Overlay: ' + escapeHtml(gen.overlayFamily) + '</p>'
-        : gen.templateName ? '<p class="muted">Current template: ' + escapeHtml(gen.templateName) + '</p>' : "";
-      // A plain ready slot with no overlay family/template name and no
-      // error has nothing to show here -- an empty .slot-card-body still
-      // has its own padding, so wrapping nothing in it silently grew the
-      // card by ~10px on every click with no visible content to justify it.
-      if (errorLine || templateLine) body = '<div class="slot-card-body">' + errorLine + templateLine + '</div>';
+      // A plain ready slot with no error has nothing extra to show here -- an empty .slot-card-body still has its own padding,
+      // so wrapping nothing in it silently grew the card by ~10px on every click.
+      if (errorLine) body += '<div class="slot-card-body">' + errorLine + '</div>';
     }
     const footerBtn = gen && gen.status === "generating"
       ? '<button type="button" class="action-btn" data-action="cancel-slot" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + s.type + '">' + (s.type === "lifestyle" ? "Discard" : "Cancel") + '</button>'
@@ -775,7 +794,7 @@ function renderVideoSlotList(product, slots) {
     const updateOverlayBtn = gen && gen.status === "ready" && gen.overlayFamily && gen.projectId
       ? '<button type="button" class="action-btn" data-action="open-update-overlay" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + s.type + '">Update Overlay</button>'
       : "";
-    return '<div class="panel-card slot-card">' +
+    return '<div class="panel-card slot-card' + (s.type === currentType ? ' selected' : '') + '">' +
       '<div class="slot-card-row" data-action="select-slot" data-video-type="' + s.type + '">' +
         thumb +
         '<div class="slot-card-meta">' +
@@ -1277,6 +1296,7 @@ async function openModal(tag, preselectType, quickGenerate) {
     // open (see onChangeImageClick) -- at most one at a time.
     changeImageTileId: null,
     otherRealImages: [],
+    otherImagesError: null,
     loadingOtherImages: false,
   };
   loadAttributeOptions();
@@ -1335,7 +1355,7 @@ async function openUpdateOverlayModal(tag, videoType) {
     // modal.step === "selecting-stills" (see openModal's own comment).
     pool: [], selectedIds: [], maxSelect: 4, loadingPool: false, poolError: null,
     generatingStills: false, uploadingNewTile: false,
-    changeImageTileId: null, otherRealImages: [], loadingOtherImages: false,
+    changeImageTileId: null, otherRealImages: [], otherImagesError: null, loadingOtherImages: false,
   };
   renderModal();
   // Awaited (unlike openModal's fire-and-forget call) -- applyDynamicVariableFields()
@@ -2145,6 +2165,7 @@ async function onChangeImageClick(id) {
   const owner = modal;
   modal.changeImageTileId = id;
   modal.otherRealImages = [];
+  modal.otherImagesError = null;
   modal.loadingOtherImages = true;
   renderStillsPool();
   try {
@@ -2154,9 +2175,11 @@ async function onChangeImageClick(id) {
     if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
     const poolUrls = new Set(modal.pool.map((p) => p.url));
     modal.otherRealImages = (body.images || []).filter((img) => !poolUrls.has(img.url)); // { url, displayUrl }
-  } catch {
+  } catch (err) {
+    // A failed fetch must not look like a genuine "this product has no other photos" result -- show it as an error instead.
     if (modal !== owner) return;
     modal.otherRealImages = [];
+    modal.otherImagesError = err.message || "Couldn't load this product's photos.";
   }
   if (modal !== owner) return;
   modal.loadingOtherImages = false;
@@ -2251,6 +2274,9 @@ function changeImagePanelHtml(tile) {
   let body;
   if (modal.loadingOtherImages) {
     body = '<div class="spinner"></div>';
+  } else if (modal.otherImagesError) {
+    body = '<span>' + escapeHtml(modal.otherImagesError) + '</span>' +
+      '<button type="button" class="btn-text" style="color:#fff;padding:4px 0" onclick="event.stopPropagation(); onChangeImageClick(\'' + tile.id + '\')">Try again</button>';
   } else if (!modal.otherRealImages.length) {
     body = '<span>No other product photos</span>';
   } else {
@@ -2523,23 +2549,18 @@ function closeModal() {
 function cancelModal() {
   const wasQuickGenerate = modal && modal.quickGenerate;
   const tag = modal && modal.tag;
-  // Checked against the live generated[] state for every video type on this product -- not just whatever THIS modal
-  // session touched. A slot can be stuck on 'candidates' with no video (an abandoned earlier session, a dropped request,
-  // a server restart mid-flow); canceling out of ANY modal for this product is a low-friction moment to self-heal all
-  // of them back to their last real version.
-  const pending = [];
-  if (tag) {
-    VIDEO_TYPES.forEach((videoType) => {
-      const gen = generated[genKey(tag, videoType)];
-      if (gen && gen.status === "candidates" && gen.currentVersionId) pending.push({ videoType, versionId: gen.currentVersionId });
-    });
-  }
+  // Restores the video type(s) THIS modal session was queued for -- not every candidates slot on the product (canceling an
+  // unrelated regenerate used to discard a different slot's pending preview as a surprise). Scoped to modal.queue, since an earlier
+  // item of a multi-type queue may also have been left at candidates. A convenience for the immediate case: the server also
+  // clears every abandoned candidates slot on each page load / Refresh (discardAbandonedCandidates), which is the real safety net.
+  const queuedTypes = modal ? modal.queue.map((item) => item.videoType) : [];
   closeModal();
-  pending.forEach(({ videoType, versionId }) => {
+  queuedTypes.forEach((videoType) => {
     const key = genKey(tag, videoType);
+    if (generated[key]?.status !== "candidates") return;
     fetch(apiUrl("/api/generated/" + encodeURIComponent(tag) + "/" + encodeURIComponent(videoType) + "/discard-candidates"), {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ versionId }),
+      body: JSON.stringify({ versionId: generated[key].currentVersionId }),
     })
       .then((res) => res.json().catch(() => ({})))
       .then((body) => {
@@ -2547,8 +2568,7 @@ function cancelModal() {
         else delete generated[key];
         renderAfterStateChange();
       })
-      // Best-effort -- a failed discard just leaves the slot showing "candidates" until the next Refresh/page load
-      // re-syncs it from the database.
+      // Best-effort -- a failed discard just leaves the slot showing "candidates" until the next page load, which clears it anyway.
       .catch(() => {});
   });
   if (wasQuickGenerate && tag && VIDEO_TYPES.every((t) => !generated[genKey(tag, t)])) {

@@ -7,6 +7,7 @@ const productService = require("../services/productService");
 const generatedState = require("../services/generatedState");
 const billing = require("../services/billingService");
 const { refreshGeneratedVideoUrls } = require("../services/videoUrlService");
+const { discardAbandonedCandidates } = require("../services/candidateService");
 const { query } = require("../db/connection");
 const { proxiedImageUrl } = require("./imageController");
 
@@ -19,6 +20,8 @@ async function bootstrap(req, res) {
       logger.error("Initial Magento product fetch failed -- rendering an empty list (use Refresh):", err.message);
     }
   }
+  // A fresh page load: any previous starting-frame pick that was never finished is abandoned, so clear it first.
+  await discardAbandonedCandidates();
   await refreshGeneratedVideoUrls();
   const { rows: [merchant] } = await query("SELECT country_code FROM merchants WHERE id = $1", [installation.merchantId]);
   res.json({

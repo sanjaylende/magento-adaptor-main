@@ -8,7 +8,8 @@ const videoVersions = require("../repositories/VideoVersionRepository");
 const { deleteVideo } = require("../services/videoEngineService");
 const { clearVideoFromProduct } = require("../services/magentoPublishService");
 const { refreshVersionUrls } = require("../services/videoUrlService");
-const { PREVIEW_STATUSES, STATUS } = require("../config/constants");
+const candidates = require("../services/candidateService");
+const { PREVIEW_STATUSES } = require("../config/constants");
 
 const { genKey, mergeVersion } = generatedState;
 
@@ -93,19 +94,9 @@ async function deleteVersion(req, res) {
 async function discardCandidates(req, res) {
   const { uniqueTag, videoType } = req.params;
   const { versionId } = req.body || {};
-  const key = genKey(uniqueTag, videoType);
   try {
-    const versions = await videoVersions.listVersions(uniqueTag, videoType);
-    if (versionId) await videoVersions.deleteVersion(versionId);
-    const remaining = versions.filter((v) => String(v.id) !== String(versionId) && v.status !== STATUS.CANDIDATES && v.status !== STATUS.EXPIRED);
-    if (remaining.length) {
-      mergeVersion(key, await videoVersions.setCurrentVersion(uniqueTag, videoType, remaining[0].id));
-    } else {
-      await videoVersions.deleteSlot(uniqueTag, videoType);
-      generatedState.remove(key);
-    }
     // The slot's resulting display state, so the client updates in place without a /api/status round-trip.
-    res.json({ ok: true, current: generatedState.get(key) || null });
+    res.json({ ok: true, current: await candidates.discardCandidates(uniqueTag, videoType, versionId) });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

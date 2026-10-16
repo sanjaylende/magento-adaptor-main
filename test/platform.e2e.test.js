@@ -219,6 +219,63 @@ describe("platform", () => {
     });
   });
 
+  describe("abandoned starting-frame picks (candidates)", () => {
+    it("loading the app discards a pick that was never finished: back to the last real video, or the slot is removed", async () => {
+      const videoVersions = require("../src/repositories/VideoVersionRepository");
+      const generatedState = require("../src/services/generatedState");
+      const { genKey, mergeVersion } = generatedState;
+      const withReady = "magento-910-1", candidatesOnly = "magento-910-2", generating = "magento-910-3";
+      let readyId, genId;
+      await ctx.runWithTenant(await ctxFor(A, 2), async () => {
+        await generatedState.ensureLoaded();
+        const ready = await videoVersions.allocateVersion(withReady, "hero_product", { status: "ready", aspectRatio: "16:9" });
+        readyId = ready.id;
+        mergeVersion(genKey(withReady, "hero_product"), ready);
+        mergeVersion(genKey(withReady, "hero_product"), await videoVersions.allocateVersion(withReady, "hero_product", { status: "candidates", aspectRatio: "16:9" }));
+        mergeVersion(genKey(candidatesOnly, "lifestyle"), await videoVersions.allocateVersion(candidatesOnly, "lifestyle", { status: "candidates", aspectRatio: "16:9" }));
+        const g = await videoVersions.allocateVersion(generating, "lifestyle", { status: "generating", aspectRatio: "16:9" });
+        genId = g.id;
+        mergeVersion(genKey(generating, "lifestyle"), g);
+        assert.equal(generatedState.get(genKey(withReady, "hero_product")).status, "candidates");
+      });
+      const r = await h.api("GET", "/api/bootstrap", { token: sessionA2 });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.generated[`${withReady}::hero_product`].status, "ready", "falls back to the earlier real video");
+      assert.equal(r.body.generated[`${withReady}::hero_product`].currentVersionId, readyId);
+      assert.equal(r.body.generated[`${candidatesOnly}::lifestyle`], undefined, "a slot that only had a pending pick is removed");
+      assert.equal(r.body.generated[`${generating}::lifestyle`].currentVersionId, genId, "a render in progress is never touched");
+      assert.equal(r.body.generated[`${generating}::lifestyle`].status, "generating");
+      await ctx.runWithTenant(await ctxFor(A, 2), async () => {
+        assert.equal((await videoVersions.listVersions(withReady, "hero_product")).length, 1, "the pending version is deleted from the database");
+        assert.equal((await videoVersions.listVersions(candidatesOnly, "lifestyle")).length, 0);
+      });
+    });
+
+    it("the discard route (used by Cancel) answers with the slot's resulting state, and only acts on the caller's own store", async () => {
+      const videoVersions = require("../src/repositories/VideoVersionRepository");
+      const generatedState = require("../src/services/generatedState");
+      const tag = "magento-911-1";
+      let pendingId;
+      await ctx.runWithTenant(await ctxFor(A, 2), async () => {
+        await generatedState.ensureLoaded();
+        const v = await videoVersions.allocateVersion(tag, "hero_product", { status: "candidates", aspectRatio: "16:9" });
+        pendingId = v.id;
+        generatedState.mergeVersion(generatedState.genKey(tag, "hero_product"), v);
+      });
+      const other = await h.api("POST", `/api/generated/${tag}/hero_product/discard-candidates`, { token: sessionB1, body: { versionId: pendingId } });
+      assert.equal(other.status, 200);
+      await ctx.runWithTenant(await ctxFor(A, 2), async () => {
+        assert.equal((await videoVersions.listVersions(tag, "hero_product")).length, 1, "another store cannot discard it");
+      });
+      const mine = await h.api("POST", `/api/generated/${tag}/hero_product/discard-candidates`, { token: sessionA2, body: { versionId: pendingId } });
+      assert.equal(mine.status, 200);
+      assert.deepEqual(mine.body, { ok: true, current: null });
+      await ctx.runWithTenant(await ctxFor(A, 2), async () => {
+        assert.equal((await videoVersions.listVersions(tag, "hero_product")).length, 0);
+      });
+    });
+  });
+
   describe("tenant isolation", () => {
     it("row-level security hides other stores' rows even from a query with no store filter", async () => {
       const sA1 = await tenants.getStore(A.installationId, 1);
