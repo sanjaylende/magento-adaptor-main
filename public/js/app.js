@@ -2006,7 +2006,13 @@ function backToForm() { modal.step = "form"; renderModal(); }
 function retryPreview() { generatePreviewForCurrent(); }
 
 function selectImage(url) { commitCurrent({ startImageUrl: url }); }
-function skipPreview() { commitCurrent({}); }
+// Same disabled-while-generating guard as confirmStillsSelection, same reason -- committing while generateStillsBatch is still in
+// flight lets its now-abandoned candidates-version allocation land on the server after this real generate call, stomping a
+// freshly-"ready" slot back to a stuck "candidates" one.
+function skipPreview() {
+  if (modal.generatingStills) return;
+  commitCurrent({});
+}
 
 // The combined pool: the product's own real photos plus AI stills --
 // both load at the same time (see loadRealProductPhotos/
@@ -2048,6 +2054,7 @@ async function loadRealProductPhotos() {
     if (modal !== owner) return;
     modal.poolError = err.message || "Couldn't load this product's photos.";
   }
+  if (modal !== owner) return;
   modal.loadingPool = false;
   renderStillsPool();
 }
@@ -2086,6 +2093,7 @@ async function generateStillsBatch() {
     if (modal !== owner) return;
     modal.poolError = "Couldn't generate images. Try again, or contact support if this keeps happening.";
   }
+  if (modal !== owner) return;
   modal.generatingStills = false;
   renderModal();
 }
@@ -2150,6 +2158,7 @@ async function onChangeImageClick(id) {
     if (modal !== owner) return;
     modal.otherRealImages = [];
   }
+  if (modal !== owner) return;
   modal.loadingOtherImages = false;
   renderStillsPool();
 }
@@ -2205,6 +2214,7 @@ async function onStillFileSelected(event) {
     modal.pool = modal.pool.filter((p) => p.id !== tile.id);
     modal.poolError = err.message || "Couldn't upload this image.";
   }
+  if (modal !== owner) return;
   modal.uploadingNewTile = false;
   renderStillsPool();
 }
@@ -2334,6 +2344,8 @@ function generatedImagesSectionHtml() {
 // what's missing instead of silently doing nothing; clicking with the
 // right count proceeds immediately, same as before.
 function confirmStillsSelection() {
+  // Also disabled in the markup while the AI batch is in flight; this guards a click landing right at that transition.
+  if (modal.generatingStills) return;
   if (modal.selectedIds.length !== modal.maxSelect) {
     const el = document.getElementById("stillsSelectionError");
     if (el) {
@@ -2738,7 +2750,7 @@ function renderModal() {
     // reference image at all (same as its old picker) -- Image
     // Transitions has no such fallback (its render mode requires 4 real
     // stills), so it gets no Skip button.
-    const skipBtn = modal.maxSelect === 1 ? '<button class="btn-text" onclick="skipPreview()">Skip, generate anyway</button>' : "";
+    const skipBtn = modal.maxSelect === 1 ? '<button class="btn-text" ' + (modal.generatingStills ? 'disabled' : '') + ' onclick="skipPreview()">Skip, generate anyway</button>' : "";
     body = '<div class="modal-header">' + header + '</div><div class="modal-body">' +
       '<p class="muted" style="margin-top:0">' + instructions + ' Hover a product photo to swap it for another.</p>' +
       (modal.poolError ? '<div class="refresh-error">' + escapeHtml(modal.poolError) + '</div>' : "") +
@@ -2752,11 +2764,11 @@ function renderModal() {
         '<span id="stillsSelectionError" class="field-hint" style="display:none;color:#b00020;width:100%;text-align:right"></span>' +
         '<button class="btn-text" onclick="backToForm()">Back</button>' +
         skipBtn +
-        '<button class="btn-primary" id="confirmStillsBtn" onclick="confirmStillsSelection()">' + confirmLabel + '</button>' +
+        '<button class="btn-primary" id="confirmStillsBtn" ' + (modal.generatingStills ? 'disabled title="Wait for image generation to finish first"' : '') + ' onclick="confirmStillsSelection()">' + confirmLabel + '</button>' +
       '</div>';
   } else if (modal.step === "picking") {
     body = '<div class="modal-header">Pick a ' + currentTypeLabel() + ' starting frame</div><div class="modal-body">' +
-      '<p class="muted">The ' + currentTypeLabel() + ' video will be generated starting from whichever frame you pick.</p>' +
+      '<p class="muted">The ' + currentTypeLabel() + ' video will be generated from your selected reference frame.</p>' +
       '<div class="preview-grid">' + modal.previewImages.map((img) =>
         '<button type="button" class="preview-tile" data-preview-url="' + escapeHtml(img.url) + '"><img src="' + escapeHtml(img.url) + '" alt="Candidate starting frame" /></button>'
       ).join("") + '</div></div>' +
