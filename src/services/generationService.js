@@ -1,5 +1,5 @@
 // Runs one generation (or an Update Overlay refresh) to completion for an already-allocated version and records the
-// result. Hero Product / Image Transitions are async jobs (polled); Lifestyle is a synchronous call.
+// result. Hero Product, Lifestyle and Image Transitions are all async video-engine jobs (polled).
 const config = require("../config");
 const logger = require("../utils/logger");
 const videoVersions = require("../repositories/VideoVersionRepository");
@@ -53,34 +53,25 @@ async function runGeneration(uniqueTag, product, params, versionId, opts = {}) {
   const vid = String(versionId);
   try {
     const result = await generateVideo(product, params, projectId ? { ...config.flipick, projectId } : config.flipick);
-    if (result.kind === "job") {
-      const withJobId = await videoVersions.updateVersionAndMirror(versionId, { jobId: result.jobId });
-      mergeVersion(key, withJobId);
-      const job = await pollHeroJobUntilSettled(result.jobId, config.flipick, {
-        onPoll: (j) => applyJobProgress(key, versionId, j),
-        shouldAbort: () => cancelRequested.has(vid),
-      });
-      if (job.aborted || cancelRequested.has(vid)) return;
-      if (job.status !== "completed" || !job.video_url) {
-        logVideoGenerationFailure({ uniqueTag, videoType: params.videoType, versionId, jobId: result.jobId, params, response: job });
-        mergeVersion(key, await videoVersions.updateVersionAndMirror(versionId, {
-          status: STATUS.ERROR, error: job.error?.message || "Render failed with no video returned.",
-        }));
-        return;
-      }
-      if (cancelRequested.has(vid)) return;
+    const withJobId = await videoVersions.updateVersionAndMirror(versionId, { jobId: result.jobId });
+    mergeVersion(key, withJobId);
+    const job = await pollHeroJobUntilSettled(result.jobId, config.flipick, {
+      onPoll: (j) => applyJobProgress(key, versionId, j),
+      shouldAbort: () => cancelRequested.has(vid),
+    });
+    if (job.aborted || cancelRequested.has(vid)) return;
+    if (job.status !== "completed" || !job.video_url) {
+      logVideoGenerationFailure({ uniqueTag, videoType: params.videoType, versionId, jobId: result.jobId, params, response: job });
       mergeVersion(key, await videoVersions.updateVersionAndMirror(versionId, {
-        status: STATUS.READY, videoUrl: job.video_url, thumbnailUrl: job.thumbnail_url || null, projectId: job.project_id || null,
+        status: STATUS.ERROR, error: job.error?.message || "Render failed with no video returned.",
       }));
-      await countIfBillable();
-    } else {
-      if (cancelRequested.has(vid)) return;
-      mergeVersion(key, await videoVersions.updateVersionAndMirror(versionId, {
-        status: STATUS.READY, videoUrl: result.videoUrl, thumbnailUrl: result.thumbnailUrl,
-        projectId: result.projectId || null, variantId: result.variantId || null,
-      }));
-      await countIfBillable();
+      return;
     }
+    if (cancelRequested.has(vid)) return;
+    mergeVersion(key, await videoVersions.updateVersionAndMirror(versionId, {
+      status: STATUS.READY, videoUrl: job.video_url, thumbnailUrl: job.thumbnail_url || null, projectId: job.project_id || null,
+    }));
+    await countIfBillable();
   } catch (err) {
     if (cancelRequested.has(vid)) return;
     logVideoGenerationFailure({ uniqueTag, videoType: params.videoType, versionId, params, response: err.stack || err.message });

@@ -139,6 +139,55 @@ async function generateImageTransitionVideo({ baseUrl, apiKey, productName, cate
   return body; // { job_id, status_url }
 }
 
+// Lifestyle: same async job/poll contract as generateHeroProductVideo above. video-engine/routes.js fully supports
+// video_type="lifestyle". Lifestyle used to go through the older, synchronous vvp-generation endpoint (flipickClient.js's
+// generateVvpVideo), which never sets the engine's isMasterExport flag; that flag also controls whether an overlay field the
+// merchant left blank renders blank or leaks its literal "$field$" placeholder into the real video. This path sets it
+// unconditionally, same as Hero Product / Image Transitions.
+async function generateLifestyleVideo({ baseUrl, apiKey, productName, category, aspectRatio, sourceImageUrl, overlayFamily, noOverlay, brandId, retailerName, sourceRef, overlayValues, theme, promptIsFinal, startImageUrl, projectId }) {
+  if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
+  if (!productName) throw new Error("productName is required");
+  // A fresh (non-refresh) Lifestyle generation needs a theme; a refresh reuses the stored project's theme verbatim.
+  if (!projectId && !theme) throw new Error("theme is required when projectId is not supplied");
+
+  const payload = {
+    video_type: "lifestyle",
+    category: category || "General",
+    aspect_ratio: ["9:16", "16:9", "1:1", "5:4"].includes(aspectRatio) ? aspectRatio : "16:9",
+    duration_seconds: 8,
+    product_name: productName,
+    overlay_family: overlayFamily || undefined,
+    // See generateHeroProductVideo's identical comment.
+    no_overlay: !!noOverlay,
+    brand_id: brandId || undefined,
+    brand_name: retailerName || undefined,
+    source_ref: sourceRef || undefined,
+    // Optional for Lifestyle: falls back to the engine's photo-less scene when the product has no image.
+    source: sourceImageUrl ? { type: "image", image_data: sourceImageUrl } : undefined,
+    overlay_values: overlayValues || {},
+    theme: theme || undefined,
+    // Set when `theme` is already the full, real constructed prompt (see getLifestyleDefaultPrompt): the engine then sends it to the
+    // model verbatim instead of wrapping it a second time.
+    prompt_is_final: !!promptIsFinal,
+    // The starting frame the merchant picked in the stills picker (the old synchronous path sent it too).
+    start_image_url: startImageUrl || undefined,
+    force_new_project: !projectId,
+    project_id: projectId || undefined,
+    callback_url: videoEngineCallbackUrl(),
+  };
+
+  const res = await loggedFetch("video-engine", `${baseUrl}/api/v2/video-engine/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`Lifestyle video generation failed (${res.status}): ${body.error || JSON.stringify(body)}`);
+  }
+  return body; // { job_id, status_url }
+}
+
 // Single poll -- caller loops this on its own interval until status leaves
 // queued/processing/rendering.
 async function pollVideoEngineJob({ baseUrl, apiKey, jobId }) {
@@ -364,4 +413,4 @@ function isVideoUrlStale(url) {
   return !expiresAt || expiresAt.getTime() - Date.now() < SIGNED_URL_STALE_BUFFER_MS;
 }
 
-module.exports = { generateHeroProductVideo, generateImageTransitionVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled, getCategoryDefault, getLifestyleDefaultPrompt, generatePreviewImages, listOverlayFamilies, getOverlayFamilyPreview, refreshProjectVideoUrls, isVideoUrlStale };
+module.exports = { generateHeroProductVideo, generateImageTransitionVideo, generateLifestyleVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled, getCategoryDefault, getLifestyleDefaultPrompt, generatePreviewImages, listOverlayFamilies, getOverlayFamilyPreview, refreshProjectVideoUrls, isVideoUrlStale };

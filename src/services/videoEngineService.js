@@ -1,10 +1,10 @@
 // Talks to the Flipick video engine / VVP backend: prompt defaults, starting-frame previews, generation, job polling and
 // remote cleanup. Also decides which overlay values a render sends.
 const {
-  generateHeroProductVideo, generateImageTransitionVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled,
+  generateHeroProductVideo, generateImageTransitionVideo, generateLifestyleVideo, pollVideoEngineJob, pollVideoEngineJobUntilSettled,
   getCategoryDefault, getLifestyleDefaultPrompt, generatePreviewImages,
 } = require("../integrations/videoEngineClient");
-const { generateVvpVideo, deleteVvpVideos } = require("../integrations/flipickClient");
+const { deleteVvpVideos } = require("../integrations/flipickClient");
 const { getThemeForCategory } = require("../config/categoryThemes");
 const { formatMoney } = require("../utils/money");
 
@@ -130,11 +130,10 @@ async function getPreviewImages(product, { videoType, prompt, aspectRatio }, opt
   });
 }
 
-// Kicks off generation. hero_product and image_transition are both async --
+// Kicks off generation. hero_product, image_transition and lifestyle are all async --
 // return { jobId } for the caller to poll via pollHeroJob/
-// pollHeroJobUntilSettled (same video-engine job/poll mechanism for both).
-// lifestyle is synchronous -- returns the final { videoUrl, thumbnailUrl }
-// directly.
+// pollHeroJobUntilSettled (same video-engine job/poll mechanism for all three).
+// lifestyle is async too (same job/poll path) -- all three types return { kind: "job", jobId }.
 //
 // overlayFamily is a single choice shared across all three video types (the
 // modal's Overlay Family picker, replacing the old per-type Template
@@ -194,49 +193,35 @@ async function generateVideo(product, { videoType, mode = "regenerate", prompt, 
     return { kind: "job", jobId };
   }
 
-  // A refresh call reuses the stored project verbatim and never needs theme
-  // at all (flipickClient's own validity check only requires theme/category/
-  // name when projectId is absent) -- computing it unconditionally would
-  // throw on an "Update Overlay" call for any product whose category isn't
-  // in CATEGORY_THEME_REGISTRY, even though that value would never reach
-  // Flipick either way.
+  // A refresh call reuses the stored project verbatim and never needs theme (generateLifestyleVideo only requires it when
+  // projectId is absent) -- computing it unconditionally would throw on an "Update Overlay" call for any product whose category
+  // isn't in the category theme registry, even though that value would never reach the engine.
   const theme = mode === "refresh" ? undefined : (prompt || getThemeForCategory(product.category));
   // The Prompt field now defaults to the real, full prompt: whatever the merchant submits, edited or not, must reach the engine
   // verbatim. Only the rare fallback (prompt cleared, short category-theme string used) still needs the engine's own wrapping.
   const promptIsFinal = mode !== "refresh" && !!prompt;
-  const response = await generateVvpVideo({
-    baseUrl: options.baseUrl,
-    apiKey: options.vvpApiKey,
-    tenantId: options.tenantId,
-    projectId: mode === "refresh" ? options.projectId : undefined,
-    forceNewProject: mode === "regenerate",
+  // Lifestyle uses the same video-engine job/poll path as Hero Product / Image Transitions (not the older synchronous
+  // vvp-generation endpoint, which never set the engine's isMasterExport flag and so leaked "$$field$$" placeholders for blank
+  // overlay fields).
+  const { job_id: jobId } = await generateLifestyleVideo({
+    baseUrl: options.videoEngineBaseUrl,
+    apiKey: options.videoEngineApiKey,
+    productName: product.name,
+    category: product.category,
+    aspectRatio,
+    sourceImageUrl: product.image || undefined,
     overlayFamily,
     noOverlay,
-    externalRef: product.uniqueTag,
-    variantName: product.name,
-    theme,
-    promptIsFinal,
-    category: product.category,
-    name: product.name,
-    values: overlay,
     brandId,
     retailerName: options.retailerName,
+    sourceRef: product.uniqueTag,
+    overlayValues: overlay,
+    theme,
+    promptIsFinal,
     startImageUrl,
-    aspectRatio,
-    // Optional -- falls back to Flipick's photo-less scene when the product
-    // has no image, same as getPreviewImages above.
-    source: product.image ? { type: "image", image_data: product.image } : undefined,
+    projectId,
   });
-  if (!response.video_url) {
-    throw new Error(response.warnings?.join("; ") || "Render failed with no video returned.");
-  }
-  return {
-    kind: "done",
-    videoUrl: response.video_url,
-    thumbnailUrl: response.thumbnail_url || null,
-    projectId: response.project_id,
-    variantId: response.variant_id,
-  };
+  return { kind: "job", jobId };
 }
 
 async function pollHeroJob(jobId, options) {
