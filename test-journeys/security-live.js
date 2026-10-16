@@ -11,7 +11,21 @@ const adminUsers = require("../src/services/adminUserService");
 const BASE = (process.argv[2] || "http://localhost:4200").replace(/\/+$/, "");
 const results = [];
 const check = (name, pass, detail = "") => { results.push({ name, pass: !!pass, detail }); console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  [${detail}]` : ""}`); };
-const psql = (sql) => execFileSync("docker", ["exec", "-i", "magento-adaptor-db-1", "psql", "-U", "adapter_owner", "-d", process.env.QA_DB || "magento_adapter", "-At"], { input: sql, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" } }).trim();
+// The adapter's database is its own schema in the shared PostgreSQL: query it with the local psql as the owner role. The regression harness passes the
+// scratch database it created (QA_DB_ADMIN_URL / QA_DB_SCHEMA); otherwise the adapter's own .env is used.
+const adapterDb = () => {
+  const txt = require("fs").readFileSync(require("path").join(__dirname, "..", ".env"), "utf8");
+  const get = (k) => (txt.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1];
+  const u = new URL((process.env.QA_DB_ADMIN_URL || get("DATABASE_ADMIN_URL") || "").trim());
+  return { host: u.hostname, port: u.port || "5432", user: decodeURIComponent(u.username), password: decodeURIComponent(u.password), database: u.pathname.slice(1), schema: (process.env.QA_DB_SCHEMA || get("DB_SCHEMA") || "magento_adapter").trim() };
+};
+const psql = (sql) => {
+  const d = adapterDb();
+  // "app.bypass" lets this staff-like session see every tenant (row-level security is forced on the tables); its "on" answer is dropped.
+  const out = execFileSync(process.env.PSQL_BIN || "psql", ["-h", d.host, "-p", d.port, "-U", d.user, "-d", process.env.QA_DB || d.database, "-At", "-q", "-v", "ON_ERROR_STOP=1"],
+    { input: "select set_config('app.bypass','on',false);\n" + sql, encoding: "utf8", env: { ...process.env, PGPASSWORD: d.password, PGOPTIONS: "-c search_path=" + d.schema } });
+  return out.replace(/^on\r?\n/, "").trim();
+};
 const post = (path, body, headers = {}) => fetch(BASE + path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 const form = (path, fields, cookie) => fetch(BASE + path, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", ...(cookie ? { Cookie: cookie } : {}) }, body: new URLSearchParams(fields) });
 const cookieOf = (res, name) => (res.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith(`${name}=`)) || "");

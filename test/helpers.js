@@ -1,28 +1,25 @@
 // Shared test setup: a throwaway database, a fake Magento REST server, a running adapter, and a signed-request client.
 const http = require("http");
 const crypto = require("crypto");
-const { Client } = require("pg");
 
 const ADAPTER_PORT = 45123;
 const MAGENTO_PORT = 45124;
 const DB_NAME = "magento_adapter_test";
-const OWNER = "postgresql://adapter_owner:adapter_owner_local@127.0.0.1:5434";
+const { createScratchDatabase } = require("./scratchDatabase");
+let scratch = null; // { databaseUrl, adminUrl, schema, ... } of the throwaway database
 
 async function resetDatabase() {
   // Payments go to a pretend ICICI bank, never to the real sandbox (see test/fakeIcici.js). Installed here, before the app is loaded,
   // so the app's own settings (log level and so on) are not read too early.
   if (!module.exports.icici) module.exports.icici = require("./fakeIcici").install();
-  const admin = new Client({ connectionString: `${OWNER}/postgres` });
-  await admin.connect();
-  await admin.query(`DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)`);
-  await admin.query(`CREATE DATABASE ${DB_NAME} OWNER adapter_owner`);
-  await admin.end();
+  scratch = await createScratchDatabase(DB_NAME);
+  module.exports.scratch = scratch;
 }
 
 function useTestEnvironment() {
   Object.assign(process.env, {
-    DATABASE_URL: `postgresql://adapter_app:adapter_app_local@127.0.0.1:5434/${DB_NAME}`,
-    DATABASE_ADMIN_URL: `${OWNER}/${DB_NAME}`,
+    // The scratch database is created by resetDatabase() (which runs first); the URLs are derived the same way here.
+    ...require("./scratchDatabase").envFor(DB_NAME),
     ADAPTER_SECRET_KEY: "11".repeat(32),
     PORT: String(ADAPTER_PORT),
     PUBLIC_BASE_URL: `http://127.0.0.1:${ADAPTER_PORT}`,
