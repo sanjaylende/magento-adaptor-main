@@ -47,7 +47,7 @@ module.exports = async function video({ stack, run, connectStore, waitStatus }) 
       if (g.status !== 200) { run.check(`${type} ${ratio}: generation accepted`, false, `HTTP ${g.status} ${g.text.slice(0, 100)}`); continue; }
       const st = await finish(A, slot, type);
       const req = await lastEngineRequest();
-      const sent = req ? (req.body.start_image_urls || [req.body.start_image_url || (req.body.source && req.body.source.url) || req.body.source_image_url]).filter(Boolean) : [];
+      const sent = req ? (req.body.start_image_urls || [req.body.start_image_url || (req.body.source && (req.body.source.url || req.body.source.image_data)) || req.body.source_image_url]).filter(Boolean) : [];
       const ok = st.status === 'ready';
       let f = { info: { width: 0, height: 0 }, colours: [] };
       if (ok) f = await frames(st, type === 'image_transition' ? [0.5, 2.5, 4.5, 6.5] : [1]);
