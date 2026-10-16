@@ -1,6 +1,17 @@
 // Single place where environment variables are read.
 require("dotenv").config();
 
+// A PostgreSQL schema name that is safe to put in a connection option: lower-case letters, digits and underscores only.
+function schemaName(value) {
+  const name = String(value || "magento_adapter").trim();
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(name)) throw new Error("DB_SCHEMA must be a plain lower-case identifier (letters, digits, underscore), got an invalid value");
+  return name;
+}
+function positiveInt(value, fallback) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 module.exports = {
   port: process.env.PORT || 4200,
   // Public address of this service: used in payment return URLs and links in invoices.
@@ -9,9 +20,19 @@ module.exports = {
   // Where researchers send vulnerability reports (served at /.well-known/security.txt).
   securityContact: process.env.SECURITY_CONTACT || "mailto:security@flipick.com",
   database: {
-    // The running service connects as a role without BYPASSRLS; migrations use the owner role.
-    url: process.env.DATABASE_URL || "postgresql://adapter_app:adapter_app_local@127.0.0.1:5434/magento_adapter",
-    adminUrl: process.env.DATABASE_ADMIN_URL || "postgresql://adapter_owner:adapter_owner_local@127.0.0.1:5434/magento_adapter",
+    // The running service connects as a role without BYPASSRLS; migrations use the owner role. Both default to the local shared
+    // PostgreSQL (127.0.0.1:5432, database ltx_1jnl) with the adapter's own roles; real values come from the environment.
+    url: process.env.DATABASE_URL || "postgresql://magento_adapter_app:magento_adapter_app_local@127.0.0.1:5432/ltx_1jnl",
+    adminUrl: process.env.DATABASE_ADMIN_URL || "postgresql://magento_adapter_owner:magento_adapter_owner_local@127.0.0.1:5432/ltx_1jnl",
+    // The schema that holds every table, sequence, function and the migration history of this adapter, set as the search_path of EVERY
+    // connection (so a pooled connection can never fall back to "public"). "public" keeps the old single-purpose-database layout working.
+    schema: schemaName(process.env.DB_SCHEMA),
+    // Connection pool of the running service (the database is shared with other applications: keep the share small).
+    poolMax: positiveInt(process.env.DB_POOL_MAX, 8),
+    idleTimeoutMs: positiveInt(process.env.DB_IDLE_TIMEOUT_MS, 30000),
+    // true (default, as before): the service applies pending migrations when it starts. false: a deploy step runs "npm run db:migrate"
+    // first and the service only checks that nothing is pending (it refuses to start otherwise).
+    runMigrationsOnStart: !["false", "0", "no", "off"].includes(String(process.env.RUN_MIGRATIONS_ON_START || "true").toLowerCase()),
     // disable | require (encrypted AND the server certificate is verified) | no-verify (encrypted, NOT verified: never in production)
     sslMode: ["require", "no-verify"].includes(process.env.DB_SSL) ? process.env.DB_SSL : "disable",
     sslCaFile: process.env.DB_SSL_CA || "",   // path to the CA certificate that signed the database server (cloud providers publish it)

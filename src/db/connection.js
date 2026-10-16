@@ -28,9 +28,21 @@ function ssl() {
   return { rejectUnauthorized: true, ...(sslCaFile ? { ca: require("fs").readFileSync(sslCaFile, "utf8") } : {}) };
 }
 
+// Settings common to both pools. The schema is a connection STARTUP option (-c search_path=...), so it is in force from the first
+// statement of every connection the pool ever opens: there is no moment at which a pooled connection could resolve a name in "public".
+function poolSettings(connectionString) {
+  return {
+    connectionString,
+    ssl: ssl(),
+    options: `-c search_path=${config.database.schema}`,
+    application_name: "magento-adapter",
+    connectionTimeoutMillis: 15000,
+  };
+}
+
 function pool() {
   if (!appPool) {
-    appPool = new Pool({ connectionString: config.database.url, ssl: ssl(), max: 10 });
+    appPool = new Pool({ ...poolSettings(config.database.url), max: config.database.poolMax, idleTimeoutMillis: config.database.idleTimeoutMs });
     // An idle connection dropped by the server (restart, failover) emits "error"; unhandled it would kill the process.
     appPool.on("error", (err) => logger.error("PostgreSQL pool error (idle client)", { error: err }));
   }
@@ -39,7 +51,7 @@ function pool() {
 
 function migrationPool() {
   if (!adminPool) {
-    adminPool = new Pool({ connectionString: config.database.adminUrl, ssl: ssl(), max: 2 });
+    adminPool = new Pool({ ...poolSettings(config.database.adminUrl), max: 2, idleTimeoutMillis: 10000 });
     adminPool.on("error", (err) => logger.error("PostgreSQL admin pool error (idle client)", { error: err }));
   }
   return adminPool;
