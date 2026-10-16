@@ -64,7 +64,7 @@ module.exports = async function ui({ stack, run, connectStore, waitStatus, repor
           const side = document.getElementById('detailSide'), main = document.getElementById('detailMain'), v = document.querySelector('#detailMain video');
           const before = side ? Math.round(side.getBoundingClientRect().width) : -1;
           let played = false;
-          if (v) { v.muted = true; try { await v.play(); played = true; } catch (e) { played = false; } await new Promise((r) => setTimeout(r, 1200)); }
+          if (v) { v.muted = true; try { await v.play(); played = true; } catch { played = false; } await new Promise((r) => setTimeout(r, 1200)); }
           const after = side ? Math.round(side.getBoundingClientRect().width) : -1;
           return {
             title: (document.querySelector('.detail-player-title') || {}).innerText || '',
