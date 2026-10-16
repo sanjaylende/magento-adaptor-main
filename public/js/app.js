@@ -1941,19 +1941,27 @@ function startGenerationMulti() {
 
 async function generatePreviewForCurrent() {
   const current = modal.queue[modal.queueIndex];
-  // Image Transitions and Hero Product both show the product's own real
-  // photos AND kick off a first AI batch at the same time (see
-  // enterStillsSelection -- loadRealProductPhotos/generateStillsBatch run
-  // in parallel, each rendering its own section as it settles), so the
-  // merchant has a full pool to pick from without an extra click; the
-  // "Generate/Regenerate Images" button (generateStillsBatch) stays
-  // available for getting a different AI batch afterward. Lifestyle is
-  // unaffected -- it keeps the old auto-generate-4-candidates flow
-  // below, since it never required a reference image at all. Branching
-  // here (rather than at startGeneration/startGenerationMulti's call
-  // sites) covers every caller for free, including commitCurrent's
-  // queue-advance when more than one video type was queued.
-  if (current.videoType === "image_transition" || current.videoType === "hero_product") {
+  // Image Transitions shows the product's own real photos AND kicks off a
+  // first AI batch at the same time (see enterStillsSelection --
+  // loadRealProductPhotos/generateStillsBatch run in parallel, each
+  // rendering its own section as it settles), so the merchant has a full
+  // pool to pick from without an extra click; the "Generate/Regenerate
+  // Images" button (generateStillsBatch) stays available for getting a
+  // different AI batch afterward. This is the only video type the picked
+  // image actually ends up as -- it's stitched into the final video
+  // verbatim, no re-generation involved.
+  //
+  // Hero Product used to share this combined picker, but is back on the
+  // plain 4-AI-candidates flow below (the same one Lifestyle uses): the
+  // engine's Hero Product path always re-composites a fresh scene from the
+  // product's own default photo whichever image is picked here, so the
+  // real-photo/upload/AI-still options were effort for a choice that was
+  // never honoured. To bring hero_product back, add it to the condition
+  // below -- the combined-pool code itself is untouched. Branching here
+  // (rather than at startGeneration/startGenerationMulti's call sites)
+  // covers every caller, including commitCurrent's queue-advance when more
+  // than one video type was queued.
+  if (current.videoType === "image_transition") {
     await enterStillsSelection();
     return;
   }
