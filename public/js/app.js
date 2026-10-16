@@ -465,11 +465,12 @@ function renderPanel() {
       rendering: "Generating…", failed: "Failed", candidates: "Awaiting your pick",
       canceled: "Canceled", ready: "Ready — click to play", published: "Published — click to play",
     }[status] || status;
+    const ratioSuffix = g.aspectRatio ? ' · <span class="ratio-inline">' + escapeHtml(g.aspectRatio) + '</span>' : '';
     return '<div class="panel-card">' +
       '<div class="panel-card-header"><span>' + escapeHtml(g.product.name) + '</span>' + badge + '</div>' +
       '<div' + clickable + '>' + media + '</div>' +
       '<div class="panel-card-footer">' +
-        '<span>' + footerLabel + '</span>' +
+        '<span>' + footerLabel + ratioSuffix + '</span>' +
         '<span>' + downloadIconBtn + deleteBtn + '</span>' +
       '</div>' +
       (isReadyLike ? '<div class="panel-card-footer">' + pushBtn + pushedNote + '</div>' : '') +
@@ -727,7 +728,10 @@ function renderDetailTabBody(product, slots) {
   else if (status === "failed") player = '<div class="detail-player-empty row-error">Generation failed. Try again, or contact support if this keeps happening.</div>';
   else if (status === "candidates") player = '<div class="detail-player-empty muted">Awaiting your pick from an earlier preview. Regenerate video to start a new one.</div>';
   else if (status === "canceled") player = '<div class="detail-player-empty muted">Generation canceled.</div>';
-  else player = '<div class="detail-player"><video src="' + escapeHtml(gen.videoUrl) + '" controls poster="' + escapeHtml(gen.thumbnailUrl || "") + '"></video></div>';
+  // controlslist="nofullscreen" + playsinline: without them, pressing Play on a bare <video> triggers the native fullscreen takeover
+  // on mobile Safari and some embedded webviews (this page runs inside the Magento admin iframe). The click-to-enlarge preview popup
+  // already had this; the inline player did not.
+  else player = '<div class="detail-player"><video src="' + escapeHtml(gen.videoUrl) + '" controls controlslist="nofullscreen" playsinline poster="' + escapeHtml(gen.thumbnailUrl || "") + '"></video></div>';
 
   const shareBtn = gen.status === "ready"
     ? '<button type="button" class="btn-text" data-action="share-preview" data-video-url="' + escapeHtml(gen.videoUrl) + '">Share preview</button>'
@@ -750,6 +754,7 @@ function renderDetailTabBody(product, slots) {
     ? '<button type="button" class="action-btn" data-action="open-update-overlay" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + slot.type + '">Update Overlay</button>'
     : "";
   const versionSuffix = gen.versionNo ? ' · Version ' + gen.versionNo : '';
+  const ratioSuffix = gen.aspectRatio ? ' · <span class="ratio-inline">' + escapeHtml(gen.aspectRatio) + '</span>' : '';
   const historyBtn = gen.versionNo > 1
     ? '<button type="button" class="btn-text" data-action="open-versions" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + slot.type + '">Version history</button>'
     : "";
@@ -759,7 +764,7 @@ function renderDetailTabBody(product, slots) {
     ? '<p class="muted overlay-line">Current template: ' + escapeHtml(gen.templateName) + '</p>'
     : '';
 
-  return '<div class="detail-player-title">' + label + versionSuffix + ' <span class="status-badge ' + status + '">' + status + '</span></div>' +
+  return '<div class="detail-player-title">' + label + versionSuffix + ratioSuffix + ' <span class="status-badge ' + status + '">' + status + '</span></div>' +
     templateLine +
     '<div class="detail-actions">' + shareBtn + downloadBtn + pushBtn + regenBtn + updateOverlayBtn + historyBtn + '</div>' +
     player;
@@ -776,6 +781,7 @@ function renderVideoSlotList(product, slots) {
       ? '<img src="' + escapeHtml(gen.thumbnailUrl) + '" class="slot-card-thumb" />'
       : '<div class="thumb-placeholder"></div>';
     const versionSuffix = gen && gen.versionNo ? ' · Version ' + gen.versionNo : '';
+    const ratioSuffix = gen && gen.aspectRatio ? ' · <span class="ratio-inline">' + escapeHtml(gen.aspectRatio) + '</span>' : '';
     // Shown whenever the slot HAS an overlay/template, not only after expanding the card -- which overlay a video uses is
     // relevant every time, not just on demand.
     const templateLine = gen && gen.overlayFamily
@@ -798,7 +804,7 @@ function renderVideoSlotList(product, slots) {
       '<div class="slot-card-row" data-action="select-slot" data-video-type="' + s.type + '">' +
         thumb +
         '<div class="slot-card-meta">' +
-          '<div class="slot-card-type">' + FULL_TYPE_LABELS[s.type] + versionSuffix + '</div>' +
+          '<div class="slot-card-type">' + FULL_TYPE_LABELS[s.type] + versionSuffix + ratioSuffix + '</div>' +
           '<span class="status-badge ' + status + '">' + status + '</span>' +
         '</div>' +
       '</div>' +

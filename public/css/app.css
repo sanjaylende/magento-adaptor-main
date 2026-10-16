@@ -60,8 +60,11 @@ s { color: #a8a69e; margin-left: 4px; }
 
 .panel-card { background: #fff; border: 0.5px solid #e5e4de; border-radius: 12px; overflow: hidden; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); transition: box-shadow 0.15s; }
 .panel-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.07); }
-.panel-card-header { padding: 9px 12px; font-size: 13px; font-weight: 600; background: #fafaf7; border-bottom: 0.5px solid #e5e4de; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; justify-content: space-between; gap: 8px; }
-.video-type-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; }
+/* align-items: flex-start plus the name span's min-width/overflow-wrap: a long product name wraps onto a second line instead of
+   squeezing the video-type badge (which keeps a reserved, never-shrinking area) until its own text is cut off. */
+.panel-card-header { padding: 9px 12px; font-size: 13px; font-weight: 600; background: #fafaf7; border-bottom: 0.5px solid #e5e4de; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.panel-card-header > span:first-child { min-width: 0; overflow-wrap: break-word; }
+.video-type-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; flex-shrink: 0; }
 .video-type-badge.hero_product { color: #8a5a00; background: #fdf0d5; }
 .video-type-badge.lifestyle { color: #534ab7; background: #eeedfe; }
 .video-type-badge.image_transition { color: #1d7a5f; background: #e3f2ed; }
@@ -265,6 +268,7 @@ s { color: #a8a69e; margin-left: 4px; }
 /* <p> tags default to a ~1em top/bottom margin; this one sits between the title (which has its own margin-bottom) and the action
    buttons/footer right after it, so the browser default left an oversized gap above and below. */
 .overlay-line { margin: 0 0 6px; }
+.ratio-inline { color: #888780; font-weight: 500; }
 
 /* Video preview popup — mirrors circular-importer's VideoPreviewDialogComponent:
    fixed 16:9 box, object-fit:contain (native fullscreen crops/pixelates these
@@ -296,8 +300,11 @@ s { color: #a8a69e; margin-left: 4px; }
 }
 .tab.active { color: #23221f; font-weight: 600; border-bottom-color: #534ab7; }
 .detail-layout { display: flex; gap: 28px; align-items: flex-start; }
-.detail-main { flex: 1 1 auto; min-width: 0; }
-.detail-side { flex: 0 1 340px; min-width: 260px; }
+/* flex-basis: 0, not auto -- an auto basis lets the video's own intrinsic aspect ratio (which the browser only treats as real once
+   playback starts) feed into this column's preferred width, squeezing .detail-side the moment Play is pressed. A 0 basis makes the
+   width purely a function of the available space, independent of what is playing inside it. */
+.detail-main { flex: 1 1 0; min-width: 0; }
+.detail-side { flex: 0 1 300px; min-width: 230px; }
 .detail-overview { background: #fff; border: 0.5px solid #e5e4de; border-radius: 12px; padding: 16px 18px; }
 .detail-player-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .detail-actions { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
