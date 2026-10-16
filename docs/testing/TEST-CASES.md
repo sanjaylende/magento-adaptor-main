@@ -73,12 +73,12 @@ and buying then cancelling a plan does not bring the used videos back.
 
 ## T5 Renditions and images (`cases/video.js`, "Case I")
 
-For each video type (image_transition, hero_product) and each size (16:9, 9:16, 1:1, 5:4): the picker lists the product's own 4 pictures in gallery order and shows them correctly;
+For each video type (image_transition, hero_product, lifestyle) and each size (16:9, 9:16, 1:1, 5:4): the picker lists the product's own 4 pictures in gallery order and shows them correctly;
 generation is accepted; the request that reaches the engine carries the right pictures in the right order and the right aspect ratio; the finished video has that shape;
 the frames of the video show those pictures (colour match against the source pictures, which are solid colours); every finished video is charged exactly once.
 The result is printed as the table "Case I: pictures -> request -> video".
-*Known issue.* F-RATIO: asking for 5:4 makes the adapter send 16:9 to the engine, so the video is 16:9 (both video types, both adapters).
-*Blocked.* Lifestyle videos (remote backend, cannot run offline).
+*Known issue.* F-RATIO: asking for 5:4 makes the adapter send 16:9 to the engine, so the video is 16:9 (Hero Product and Image Transitions, both adapters; Lifestyle sends 5:4 correctly).
+Lifestyle runs through the same engine job/poll path as Hero Product, so the mock engine covers it (the real engine's prompt and picture quality are not covered: see M4).
 
 ## T6 Regeneration and image replacement
 
@@ -134,7 +134,7 @@ Both run against the adapter with the rate limits scaled up (`RATE_LIMIT_SCALE`,
 | M1 | Open the merchant app in the store admin of each platform and look at the list, a ready video, the generate dialog, the plan dialog | Chrome, desktop and a 390 px window; compare with the screenshots of the previous run |
 | M2 | Press Play on a generated video from the grid and from the storefront product page; check it plays and is the right shape | Chrome |
 | M3 | Overlay text legible and not cut off in all four sizes | needs the real engine (LTX on :3000); BLOCKED with the mock engine |
-| M4 | Lifestyle video end to end | needs the remote backend; BLOCKED offline |
+| M4 | Lifestyle video end to end with the real engine (prompt and picture quality) | needs the real engine (LTX on :3000) and costs credits; BLOCKED with the mock engine |
 | M5 | Pay with the real ICICI sandbox | never done in this environment; BLOCKED by policy |
 | M6 | Look at the `docs/testing` report of the previous run and confirm that nothing that passed before fails now | compare the two reports |
 

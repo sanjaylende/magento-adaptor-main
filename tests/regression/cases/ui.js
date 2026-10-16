@@ -58,10 +58,40 @@ module.exports = async function ui({ stack, run, connectStore, waitStatus, repor
       await step('3-search-long-text', async () => { await page.fill('input[placeholder="Search products"]', 'x'.repeat(300)); });
       await page.fill('input[placeholder="Search products"]', '').catch(() => {});
       await step('4-detail-ready-video', async () => { await page.locator('#rows tr', { hasText: products[0].name }).first().locator('button').first().click(); await page.waitForSelector('#detailMain video, #detailMain .detail-actions', { timeout: 30000 }); });
+      // Shopify-parity checks (aspect ratio shown, selected slot marked, inline player flags, no layout shift on Play)
+      {
+        const d = await page.evaluate(async () => {
+          const side = document.getElementById('detailSide'), main = document.getElementById('detailMain'), v = document.querySelector('#detailMain video');
+          const before = side ? Math.round(side.getBoundingClientRect().width) : -1;
+          let played = false;
+          if (v) { v.muted = true; try { await v.play(); played = true; } catch (e) { played = false; } await new Promise((r) => setTimeout(r, 1200)); }
+          const after = side ? Math.round(side.getBoundingClientRect().width) : -1;
+          return {
+            title: (document.querySelector('.detail-player-title') || {}).innerText || '',
+            ratioInline: (document.querySelector('.detail-player-title .ratio-inline') || {}).innerText || '',
+            selected: document.querySelectorAll('.slot-card.selected').length,
+            slotTypeText: Array.from(document.querySelectorAll('.slot-card-type')).map((e) => e.innerText).join(' | '),
+            flags: v ? { controlslist: v.getAttribute('controlslist'), playsinline: v.hasAttribute('playsinline') } : null,
+            before, after, played, mainWidth: main ? Math.round(main.getBoundingClientRect().width) : -1,
+          };
+        }).catch((e) => ({ error: e.message }));
+        run.check(`${tagName} detail: the ready video's aspect ratio is shown next to the version`, /^(16:9|9:16|1:1|5:4)$/.test(String(d.ratioInline).trim()), d.title ? d.title.replace(/\s+/g, ' ') : String(d.error));
+        run.check(`${tagName} detail: the slot card shows the ratio and exactly one card is marked as selected`, d.selected === 1 && /16:9/.test(d.slotTypeText || ''), `selected ${d.selected}: ${d.slotTypeText}`);
+        run.check(`${tagName} detail: inline player has controlslist=nofullscreen and playsinline`, !!d.flags && d.flags.controlslist === 'nofullscreen' && d.flags.playsinline, JSON.stringify(d.flags));
+        run.check(`${tagName} detail: the side column keeps its width when Play is pressed`, d.before > 0 && d.before === d.after, `before ${d.before}px, after ${d.after}px, played ${d.played}`);
+      }
       await step('5-generate-dialog', async () => { await page.locator('#detailMain button', { hasText: /Regenerate video/ }).first().click(); await page.waitForSelector('.modal', { timeout: 30000 }); });
       await step('6-dialog-settings', async () => { await page.waitForSelector('#submitBtn', { timeout: 30000 }); await page.waitForTimeout(1000); });
       await step('7-long-prompt', async () => { const ta = page.locator('.modal textarea').first(); if (await ta.count()) await ta.fill('A very long prompt. '.repeat(60)); });
       await step('8-stills-picker', async () => { await page.locator('#submitBtn').click(); await page.waitForSelector('#productImagesRoot, .modal .preview-grid', { timeout: 30000 }); await page.waitForTimeout(2000); });
+      {
+        const hero = await page.evaluate(() => {
+          const m = document.querySelector('.modal');
+          return { text: m ? m.innerText.replace(/\s+/g, ' ') : '', combinedPool: !!document.getElementById('productImagesRoot'), tiles: document.querySelectorAll('.modal .preview-tile').length };
+        }).catch(() => ({ text: '', combinedPool: true, tiles: 0 }));
+        run.check(`${tagName} Hero Product goes to the 4-candidates picker (not the combined real-photo pool), with a skip option`, !hero.combinedPool && hero.tiles === 4 && /None of these, skip/.test(hero.text), `combined pool ${hero.combinedPool}, ${hero.tiles} candidates: ${hero.text.slice(0, 120)}`);
+        run.check(`${tagName} picker copy says the picked frame is a reference frame`, /generated from your selected reference frame/.test(hero.text), hero.text.slice(0, 120));
+      }
       await page.evaluate(() => { if (typeof cancelModal === 'function') cancelModal(); else if (typeof closeModal === 'function') closeModal(); }).catch(() => {});
       await step('9-plan-dialog', async () => { await page.goto(appUrl(), { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => typeof openPlanModal === 'function' && document.querySelector('#usageBadge')?.innerText.trim().length > 0, null, { timeout: 60000 }); await page.evaluate(() => openPlanModal('manual')); await page.waitForSelector('.plan-modal', { timeout: 20000 }); });
       await step('10-payment-history', async () => { await page.locator('.plan-footer .btn-text', { hasText: 'Payments' }).click(); await page.waitForTimeout(1200); });

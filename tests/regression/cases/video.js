@@ -1,7 +1,7 @@
 // T5 renditions and images, T6 regeneration and image replacement, T7 overlay, T8 uploaded images.
 // The mock engine renders real videos from the images it is sent, so the colours in the finished video's frames are compared with the colours of the
-// product's own pictures. Credit for generations comes from a paid Pro plan (bought through the pretend bank). Lifestyle videos are not covered
-// here: they are made by a remote backend that cannot be run offline (reported as Blocked).
+// product's own pictures. Credit for generations comes from a paid Pro plan (bought through the pretend bank). Lifestyle videos now go through the same job/poll
+// path as Hero Product, so the mock engine covers them too (the real LTX prompt and picture quality are not covered; see M4).
 const media = require('../lib/media');
 
 const GALLERY = ['qa-red.jpg', 'qa-green.jpg', 'qa-blue.jpg', 'qa-yellow.jpg'];
@@ -31,7 +31,7 @@ module.exports = async function video({ stack, run, connectStore, waitStatus }) 
   const frames = async (st, secondsList) => { const f = await media.download(st.videoUrl); return { file: f, info: media.probe(f), colours: secondsList.map((s) => media.frameColour(f, s).name) }; };
 
   // ------------------------------------------------------------------ T5 renditions and images (Case I)
-  run.section('T5', 'Renditions: product pictures -> engine request -> video frames, 4 sizes x 2 video types');
+  run.section('T5', 'Renditions: product pictures -> engine request -> video frames, 4 sizes x 3 video types');
   const rows = [];
   const shown = await imagesOf(A, tagA);
   const urls = shown.map((i) => i.url);
@@ -39,7 +39,7 @@ module.exports = async function video({ stack, run, connectStore, waitStatus }) 
   const shownColours = [];
   for (const i of shown) { const r = await fetch(stack.base + i.displayUrl); shownColours.push(media.imageColour(Buffer.from(await r.arrayBuffer())).name); }
   run.check('the pictures the merchant sees in the picker (through the adapter) are the product\'s own pictures', shownColours.join(',') === 'red,green,blue,yellow', shownColours.join(','));
-  for (const type of ['image_transition', 'hero_product']) {
+  for (const type of ['image_transition', 'hero_product', 'lifestyle']) {
     for (const ratio of RATIOS) {
       const slot = await tagOf(A, type === 'image_transition' ? 0 : 0);
       const body = type === 'image_transition' ? { uniqueTag: slot, videoType: type, aspectRatio: ratio, startImageUrls: urls } : { uniqueTag: slot, videoType: type, aspectRatio: ratio, startImageUrl: urls[0] };
@@ -58,7 +58,7 @@ module.exports = async function video({ stack, run, connectStore, waitStatus }) 
       run.check(`${type} ${ratio}: the engine received the product's own pictures, in order`, sent.join('|') === (type === 'image_transition' ? urls : [urls[0]]).join('|'), sent.length + ' pictures');
       run.check(`${type} ${ratio}: video frames show those pictures (colour match)`, ok && f.colours.join(',') === wantColours, f.colours.join(','), wantColours);
       const asked = req && req.body.aspect_ratio;
-      if (ratio === '5:4') {
+      if (ratio === '5:4' && type !== 'lifestyle') {
         run.known(`${type} 5:4: the engine is asked for a 5:4 video`, asked === '5:4', `engine was asked for ${asked}, video is ${gotRatio}`, 'adapter sends 16:9 for 5:4 (videoEngineClient.js lists only 9:16, 16:9, 1:1)');
       } else {
         run.check(`${type} ${ratio}: engine asked for ${ratio} and the video is ${ratio}`, asked === ratio && gotRatio === ratio, `asked ${asked}, video ${gotRatio}`);
@@ -69,7 +69,6 @@ module.exports = async function video({ stack, run, connectStore, waitStatus }) 
   run.table('Case I: pictures -> request -> video', ['video type', 'asked size', 'engine asked', 'video size', 'sent to engine', 'video frames', 'expected frames'], rows);
   const usage = Number((await stack.db('select count(*)::int as n from usage_events where store_id = $1', [idA]))[0].n);
   run.check('every finished video was charged exactly once', usage === rows.filter((r) => /x/.test(r[3])).length, `${usage} charges for ${rows.length} videos`);
-  run.blocked('Lifestyle videos (made by the remote backend)', 'the remote Lifestyle service cannot run offline');
 
   // ------------------------------------------------------------------ T6 regeneration and image replacement
   run.section('T6', 'Regeneration, version history, replaced pictures');
