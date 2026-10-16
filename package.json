@@ -11,7 +11,12 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "regression": "node tests/regression/run.js",
     "regression:soak": "node tests/regression/run.js soak",
-    "db:up": "docker compose up -d db",
+    "db:bootstrap": "node scripts/db/provision.js",
+    "db:provision": "node scripts/db/provision.js",
+    "db:migrate": "node scripts/db/migrate.js",
+    "db:status": "node scripts/db/status.js",
+    "db:verify": "node scripts/db/verify.js",
+    "db:manifest": "node scripts/db/manifest.js",
     "sbom": "npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-format JSON --output-file sbom.cdx.json",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "lint": "eslint ."
