@@ -26,7 +26,6 @@ test("generateLifestyleVideo posts a lifestyle job to the video engine and retur
       baseUrl: e.base, apiKey: "k", productName: "Red Apples", category: "Fruits", aspectRatio: "5:4",
       sourceImageUrl: "https://cdn.example/apples.jpg", overlayFamily: "Offer Banner", noOverlay: false, brandId: "b1",
       retailerName: "Shop", sourceRef: "t-1", overlayValues: { v1: "x" }, theme: "the full prompt", promptIsFinal: true,
-      startImageUrl: "https://cdn.example/still.png",
     });
     assert.equal(out.job_id, "job-1");
     const r = e.seen[0];
@@ -46,7 +45,7 @@ test("generateLifestyleVideo posts a lifestyle job to the video engine and retur
     assert.equal(b.source_ref, "t-1");
     assert.deepEqual(b.overlay_values, { v1: "x" });
     assert.deepEqual(b.source, { type: "image", image_data: "https://cdn.example/apples.jpg" });
-    assert.equal(b.start_image_url, "https://cdn.example/still.png");
+    assert.equal(b.start_image_url, undefined, "like Shopify, Lifestyle does not send a starting frame");
     assert.match(b.callback_url, /\/api\/webhooks\/video-engine$/);
   } finally { e.server.close(); }
 });
@@ -86,7 +85,7 @@ test("generateVideo returns a job (not a finished video) for lifestyle, like her
     assert.equal(b.brand_name, "Shop");
     assert.equal(b.overlay_values.v1, "a");
     assert.equal(b.overlay_values.v2, "");
-    assert.equal(b.start_image_url, "https://cdn.example/s.png");
+    assert.equal(b.start_image_url, undefined);
     // no prompt: the short category theme is used and the engine wraps it itself
     await generateVideo(product, { videoType: "lifestyle", aspectRatio: "16:9" }, options);
     assert.equal(e.seen[1].body.theme, "Fresh Produce");

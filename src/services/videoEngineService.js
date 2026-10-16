@@ -218,7 +218,6 @@ async function generateVideo(product, { videoType, mode = "regenerate", prompt, 
     overlayValues: overlay,
     theme,
     promptIsFinal,
-    startImageUrl,
     projectId,
   });
   return { kind: "job", jobId };

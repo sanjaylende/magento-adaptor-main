@@ -144,7 +144,7 @@ async function generateImageTransitionVideo({ baseUrl, apiKey, productName, cate
 // generateVvpVideo), which never sets the engine's isMasterExport flag; that flag also controls whether an overlay field the
 // merchant left blank renders blank or leaks its literal "$field$" placeholder into the real video. This path sets it
 // unconditionally, same as Hero Product / Image Transitions.
-async function generateLifestyleVideo({ baseUrl, apiKey, productName, category, aspectRatio, sourceImageUrl, overlayFamily, noOverlay, brandId, retailerName, sourceRef, overlayValues, theme, promptIsFinal, startImageUrl, projectId }) {
+async function generateLifestyleVideo({ baseUrl, apiKey, productName, category, aspectRatio, sourceImageUrl, overlayFamily, noOverlay, brandId, retailerName, sourceRef, overlayValues, theme, promptIsFinal, projectId }) {
   if (!baseUrl || !apiKey) throw new Error("baseUrl and apiKey are required");
   if (!productName) throw new Error("productName is required");
   // A fresh (non-refresh) Lifestyle generation needs a theme; a refresh reuses the stored project's theme verbatim.
@@ -169,8 +169,6 @@ async function generateLifestyleVideo({ baseUrl, apiKey, productName, category, 
     // Set when `theme` is already the full, real constructed prompt (see getLifestyleDefaultPrompt): the engine then sends it to the
     // model verbatim instead of wrapping it a second time.
     prompt_is_final: !!promptIsFinal,
-    // The starting frame the merchant picked in the stills picker (the old synchronous path sent it too).
-    start_image_url: startImageUrl || undefined,
     force_new_project: !projectId,
     project_id: projectId || undefined,
     callback_url: videoEngineCallbackUrl(),
