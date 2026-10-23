@@ -187,6 +187,6 @@ async function getStoreSettings(storeId) {
 }
 
 module.exports = {
-  httpError, getInstallationByKey, getActiveInstallationByHost, getInstallation, getInstallationAndStore, getStore, getStoreById, listStores, syncStores,
+  httpError, getInstallationByKey, getActiveInstallationByHost, invalidateInstallation, getInstallation, getInstallationAndStore, getStore, getStoreById, listStores, syncStores,
   registerInstallation, touchInstallation, markUninstalled, magentoConfigFor, getStoreSettings,
 };

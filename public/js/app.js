@@ -2932,6 +2932,38 @@ setInterval(() => { if (view.mode === "list") renderRows(); }, 60000);
   const wasOpen = {};
   const openers = {};
 
+  // How to find the control that opened a dialog again if the page behind it was re-drawn while the dialog was open.
+  function selectorFor(el) {
+    if (!el || el === document.body) return "";
+    if (el.id) return "#" + CSS.escape(el.id);
+    const attrs = ["data-action", "data-tag", "data-video-type"].filter((n) => el.hasAttribute(n));
+    return attrs.length ? el.tagName.toLowerCase() + attrs.map((n) => "[" + n + "=\"" + CSS.escape(el.getAttribute(n)) + "\"]").join("") : "";
+  }
+  // Opening a dialog often re-draws the page behind it, so the control that was used may already be gone when the dialog is noticed:
+  // remember the last control the person activated (a click, or Enter/Space on a button, both arrive as a click).
+  let lastControl = null;
+  document.addEventListener("click", (e) => {
+    const c = e.target && e.target.closest ? e.target.closest("button, a[href], select, input, [data-action]") : null;
+    if (c) lastControl = { el: c, sel: selectorFor(c), text: (c.textContent || "").trim() };
+  }, true);
+
+  function restoreFocus(opener) {
+    // Several controls can share the same attributes (every slot has a "Regenerate video" button): the label tells them apart.
+    const findAgain = () => {
+      if (!opener.sel) return null;
+      const all = Array.from(document.querySelectorAll(opener.sel));
+      return all.find((el) => (el.textContent || "").trim() === opener.text) || all[0] || null;
+    };
+    const target = opener.el && document.contains(opener.el) ? opener.el : findAgain();
+    if (target) target.focus();
+    // The page behind may be re-drawn just after the dialog closes: if focus was lost again, look the control up once more.
+    setTimeout(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      const again = findAgain();
+      if (again) again.focus();
+    }, 150);
+  }
+
   function sync(o) {
     const open = isOpen(o);
     // First, so that focus can go back to the page behind a closing dialog: nothing behind an open dialog can be reached by keyboard or screen reader
@@ -2946,7 +2978,7 @@ setInterval(() => { if (view.mode === "list") renderRows(); }, 60000);
       dlg.tabIndex = -1;
       const active = document.activeElement;
       if (!wasOpen[o.id]) {
-        openers[o.id] = active;
+        openers[o.id] = active && active !== document.body ? { el: active, sel: selectorFor(active), text: (active.textContent || "").trim() } : lastControl;
         const first = Array.from(dlg.querySelectorAll(FOCUSABLE)).find((el) => el.offsetParent !== null);
         (first || dlg).focus();
       } else if (!active || active === document.body) {
@@ -2955,7 +2987,7 @@ setInterval(() => { if (view.mode === "list") renderRows(); }, 60000);
     } else if (wasOpen[o.id]) {
       const opener = openers[o.id];
       delete openers[o.id];
-      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
+      if (opener && opener.el) restoreFocus(opener);
     }
     wasOpen[o.id] = open;
   }

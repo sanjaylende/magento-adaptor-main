@@ -33,7 +33,7 @@ th { color: #5f5e5a; font-weight: 600; font-size: 12.5px; text-transform: upperc
 tr:last-child td { border-bottom: none; }
 .thumb { width: 48px; height: 48px; object-fit: contain; background: #fff; border: 1px solid #e8e6e0; border-radius: 4px; }
 .thumb-placeholder { width: 48px; height: 48px; background: #f4f3ef; border-radius: 4px; }
-s { color: #a8a69e; margin-left: 4px; }
+s { color: #6b6a64; margin-left: 4px; }
 .offer-pct { color: #1a7a3d; font-size: 12px; margin-left: 4px; }
 
 .action-btn {

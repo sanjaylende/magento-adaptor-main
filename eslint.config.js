@@ -15,7 +15,7 @@ const browserGlobals = {
   setTimeout: "readonly", setInterval: "readonly", clearTimeout: "readonly", clearInterval: "readonly", sessionStorage: "readonly",
   localStorage: "readonly", requestAnimationFrame: "readonly", getComputedStyle: "readonly", confirm: "readonly", alert: "readonly",
   AbortController: "readonly", Image: "readonly", Event: "readonly", CustomEvent: "readonly", MutationObserver: "readonly",
-  IntersectionObserver: "readonly", ResizeObserver: "readonly", DOMParser: "readonly", Intl: "readonly", crypto: "readonly",
+  IntersectionObserver: "readonly", ResizeObserver: "readonly", CSS: "readonly", DOMParser: "readonly", Intl: "readonly", crypto: "readonly",
 };
 
 module.exports = [
