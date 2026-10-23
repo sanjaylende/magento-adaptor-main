@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Magento → Flipick product picker</title>
@@ -22,8 +22,8 @@
     <div class="selection-layout">
       <div class="main-column">
         <div class="toolbar">
-          <input type="text" class="toolbar-search" id="searchInput" placeholder="Search products" />
-          <select class="toolbar-select" id="sortSelect">
+          <input type="text" class="toolbar-search" id="searchInput" placeholder="Search products" aria-label="Search products" />
+          <select class="toolbar-select" id="sortSelect" aria-label="Sort products">
             <option value="recent">Most recent generation</option>
             <option value="name">Name (A-Z)</option>
             <option value="category">Category</option>
@@ -31,8 +31,8 @@
             <option value="price-desc">Price: high to low</option>
             <option value="price-asc">Price: low to high</option>
           </select>
-          <select class="toolbar-select" id="categorySelect"></select>
-          <select class="toolbar-select" id="statusSelect">
+          <select class="toolbar-select" id="categorySelect" aria-label="Filter by category"></select>
+          <select class="toolbar-select" id="statusSelect" aria-label="Filter by video status">
             <option value="All">Status: All</option>
             <option value="rendering">Rendering</option>
             <option value="ready">Ready</option>
@@ -45,7 +45,7 @@
         <div class="filter-chips" id="filterChips"></div>
         <div class="refresh-error" id="refreshError" style="display:none"></div>
         <table>
-          <thead><tr><th></th><th>Name</th><th>Category</th><th>Price</th><th>Video status</th><th>Updated</th><th>Actions</th></tr></thead>
+          <thead><tr><th><span class="sr-only">Image</span></th><th>Name</th><th>Category</th><th>Price</th><th>Video status</th><th>Updated</th><th>Actions</th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
         <div class="pagination" id="pagination"></div>

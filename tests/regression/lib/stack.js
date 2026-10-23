@@ -30,7 +30,6 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   await admin.query(`CREATE DATABASE ${dbName} OWNER adapter_owner`);
   await admin.end();
 
-  const staffPassword = require('crypto').randomBytes(9).toString('hex');
   const work = fs.mkdtempSync(path.join(os.tmpdir(), `regression-${platform}-`));
   const children = [];
   const spawnNode = (args, env, name) => { const logFile = fs.openSync(path.join(work, `${name}.log`), 'a'); const c = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ['ignore', logFile, logFile], windowsHide: true }); children.push(c); return c; };
@@ -51,6 +50,7 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
     process.chdir(${JSON.stringify(repo)});
     const fake = require(path.join(${JSON.stringify(repo)}, "test", "fakeIcici.js"));
     Object.assign(process.env, fake.ENV);
+    Object.assign(process.env, require(path.join(${JSON.stringify(repo)}, "test", "fakeLtx.js")).ENV); require(path.join(${JSON.stringify(repo)}, "test", "fakeLtx.js")).start(); // staff sign in against a pretend LTX (set before anything loads the config)
     const icici = fake.install();
     require("http").createServer(async (req, res) => {
       const u = new URL(req.url, "http://x");
@@ -64,7 +64,7 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   spawnNode([launcher], {
     PORT: String(port), PUBLIC_BASE_URL: `http://127.0.0.1:${port}`, NODE_ENV: 'development', LOG_LEVEL: 'info',
     DATABASE_URL: `postgresql://adapter_app:adapter_app_local@127.0.0.1:${pgPort}/${dbName}`, DATABASE_ADMIN_URL: `${OWNER}/${dbName}`,
-    ADAPTER_SECRET_KEY: '33'.repeat(32), ADMIN_BOOTSTRAP_EMAIL: 'staff@regression.local', ADMIN_BOOTSTRAP_PASSWORD: staffPassword, // made up for this run only
+    ADAPTER_SECRET_KEY: '33'.repeat(32), // staff sign in through the pretend LTX (test/fakeLtx.js), so no staff password is configured here
     FLIPICK_VIDEO_ENGINE_BASE_URL: engine, FLIPICK_VIDEO_ENGINE_API_KEY: engineKey, FLIPICK_SPONSORED_ADS_BASE_URL: engine, FLIPICK_VVP_API_KEY: 'test',
     FLIPICK_TENANT_ID: 'regression', RETAILER_NAME: 'Regression Retailer', BILLING_GRACE_DAYS: '3',
     ...(rateLimitScale ? { RATE_LIMIT_SCALE: String(rateLimitScale) } : {}),
@@ -78,7 +78,7 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   const ownerPool = new pg.Pool({ connectionString: `${OWNER}/${dbName}`, max: 2 });
 
   return {
-    base, engine, platform, repo, work, helpers, port, store: fakeStore, staff: { email: 'staff@regression.local', password: staffPassword },
+    base, engine, platform, repo, work, helpers, port, store: fakeStore, staff: { email: 'staff@test.local', password: 'staff-password-1' }, // the pretend LTX's superadmin (made up, test only)
     db: async (sql, params) => (await ownerPool.query(sql, params)).rows,
     pay: async (txn, result = 'paid') => { const r = await fetch(`http://127.0.0.1:${port + 80}/pay?txn=${encodeURIComponent(txn)}&result=${result}`); return (await r.text()).replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); },
     engineRequests: async () => (await fetch(`${engine}/_requests`)).json(),

@@ -21,7 +21,7 @@ END="$(date +%s)"
 # sanity: the restored copy has the same tables and row counts as the live database for the tables that matter
 check() { PGDATABASE="$1" psql -Atqc "SELECT count(*) FROM $2"; }
 FAIL=0
-for TABLE in merchants installations stores store_subscriptions payment_orders invoices admin_users; do
+for TABLE in merchants installations stores store_subscriptions payment_orders invoices; do
   A="$(check "$LIVE_DB" $TABLE)"; B="$(check "$SCRATCH" $TABLE)"
   printf '  %-20s live=%s restored=%s\n' "$TABLE" "$A" "$B"
   [ "$A" -ge "$B" ] || FAIL=1   # the live database may have grown since the backup, never shrunk below it

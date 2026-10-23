@@ -26,13 +26,13 @@ PostgreSQL row-level security enforces it (the service connects as a role withou
 
 ```
 docker compose up -d db          # PostgreSQL on 127.0.0.1:5434 (also started by D:\Magento-Vanilla\scripts\start-all.ps1)
-cp .env.example .env             # set ADAPTER_SECRET_KEY, ADMIN_BOOTSTRAP_EMAIL / PASSWORD, video engine keys
+cp .env.example .env             # set ADAPTER_SECRET_KEY, video engine keys, INTERNAL_API_SECRET
 npm install
 npm start                        # migrations run automatically; http://localhost:4200
 npm test                         # needs the database above; creates and drops its own magento_adapter_test database
 ```
 
-Staff console: `http://localhost:4200/admin` (first admin comes from `ADMIN_BOOTSTRAP_*`).
+Staff console: `http://localhost:4200/admin` (sign in with your LTX account: Flipick superadmins and this tenant's admins).
 
 ## How an installation connects
 

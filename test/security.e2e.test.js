@@ -1,4 +1,4 @@
-// Security behaviour of the running adapter (real PostgreSQL + fake Magento): headers, input validation, lock-out, SSRF and so on.
+// Security behaviour of the running adapter (real PostgreSQL + fake Magento): headers, input validation, staff sign-in, SSRF and so on.
 // The authentication, replay, expiry and cross-store tests live in platform.e2e.test.js; this file adds the hardening checks.
 const { describe, it, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
@@ -16,7 +16,6 @@ describe("security hardening", () => {
     const { runMigrations, syncEntityTypes } = require("../src/db/migrate");
     await runMigrations();
     await syncEntityTypes([require("../src/models/VideoSlot"), require("../src/models/VideoVersion"), require("../src/models/StoreSetting")]);
-    await require("../src/services/adminUserService").ensureBootstrapAdmin();
     db = require("../src/db/connection");
     httpServer = require("../src/app").createApp().listen(h.ADAPTER_PORT);
     const r = await h.api("POST", "/api/v1/register", { body: { baseUrl: `http://127.0.0.1:${h.MAGENTO_PORT}`, magentoToken: "good-token", merchantName: "Sec Test", contactEmail: "s@test.local", countryCode: "IN" } });
@@ -242,128 +241,109 @@ describe("security hardening", () => {
     });
   });
 
-  // ---- H4: staff console sign-in ----
-  describe("H4 staff console lock-out, two-factor, idle timeout, CSRF", () => {
-    const { authenticator } = require("otplib");
-    let users, config, crypto;
+  // ---- H4: staff console sign-in (delegated to LTX, see test/fakeLtx.js) ----
+  describe("H4 staff console sign-in through LTX, idle timeout, CSRF", () => {
+    let config, crypto;
     const post = (path, form, cookie) => fetch(BASE() + path, {
       method: "POST", redirect: "manual",
       headers: { "Content-Type": "application/x-www-form-urlencoded", ...(cookie ? { Cookie: cookie } : {}) },
       body: new URLSearchParams(form),
     });
     const cookieOf = (res, name) => (res.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith(`${name}=`)) || "");
-    const addStaff = (email, password) => db.asSystem(() => db.query(
-      `INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, 'admin')
-       ON CONFLICT (email) DO UPDATE SET password_hash = $2, failed_attempts = 0, locked_until = NULL, totp_enabled = FALSE, totp_secret = NULL, totp_last_step = 0`,
-      [email, users.hashPassword(password)]));
-    const idOf = async (email) => (await db.asSystem(() => db.query("SELECT id FROM admin_users WHERE email = $1", [email]))).rows[0].id;
+    const signIn = (email, password) => post("/admin/login", { email, password });
 
     before(() => {
-      users = require("../src/services/adminUserService");
       config = require("../src/config");
       crypto = require("../src/utils/crypto");
     });
     beforeEach(async () => {
       await db.asSystem(() => db.query("DELETE FROM rate_limits"));
-      config.admin.require2fa = false;
-      config.admin.maxFailedLogins = 3;
+      h.ltx.state.down = false;
       config.admin.idleMinutes = 30;
     });
 
-    it("locks the account after repeated failures; a locked account answers exactly like a wrong password", async () => {
-      await addStaff("lock@test.local", "right-password-1");
-      const wrong = await post("/admin/login", { email: "lock@test.local", password: "nope" });
-      assert.equal(wrong.status, 401);
-      const wrongText = await wrong.text();
-      await post("/admin/login", { email: "lock@test.local", password: "nope" });
-      await post("/admin/login", { email: "lock@test.local", password: "nope" }); // third failure: locked
-      const lockedRight = await post("/admin/login", { email: "lock@test.local", password: "right-password-1" });
-      assert.equal(lockedRight.status, 401, "correct password refused while locked");
-      assert.equal(cookieOf(lockedRight, "fl_admin"), "");
-      assert.equal(await lockedRight.text(), wrongText, "same page: nothing reveals the lock");
-      const row = (await db.asSystem(() => db.query("SELECT failed_attempts, locked_until FROM admin_users WHERE email = 'lock@test.local'"))).rows[0];
-      assert.ok(row.failed_attempts >= 3 && new Date(row.locked_until) > new Date());
-      // after the lock time the right password works again
-      await db.asSystem(() => db.query("UPDATE admin_users SET locked_until = now() - interval '1 minute' WHERE email = 'lock@test.local'"));
-      const ok = await post("/admin/login", { email: "lock@test.local", password: "right-password-1" });
-      assert.equal(ok.status, 302);
-      assert.match(cookieOf(ok, "fl_admin"), /^fl_admin=.+/);
+    it("an LTX superadmin and an admin of this tenant sign in; the console role is 'admin'", async () => {
+      for (const [email, password] of [["staff@test.local", "staff-password-1"], ["tenant-admin@test.local", "tenant-password-1"]]) {
+        const ok = await signIn(email, password);
+        assert.equal(ok.status, 302, email);
+        assert.equal(ok.headers.get("location"), "/admin");
+        const page = await fetch(`${BASE()}/admin`, { headers: { Cookie: cookieOf(ok, "fl_admin") } });
+        assert.equal(page.status, 200);
+        assert.match(await page.text(), new RegExp(`${email.replace(".", "\\.")} \\(admin\\)`));
+      }
     });
 
-    it("an unknown e-mail gets the same answer as a wrong password", async () => {
-      await addStaff("known@test.local", "right-password-2");
-      const a = await post("/admin/login", { email: "known@test.local", password: "wrong" });
-      const b = await post("/admin/login", { email: "ghost@test.local", password: "wrong" });
-      assert.equal(a.status, b.status);
-      assert.equal(await a.text(), await b.text());
+    it("a wrong password, an unknown e-mail, another tenant's admin and a non-admin LTX user all get the same refusal", async () => {
+      const attempts = [["staff@test.local", "wrong"], ["ghost@test.local", "wrong"], ["other-admin@test.local", "other-password-1"], ["member@test.local", "member-password-1"]];
+      const answers = [];
+      for (const [email, password] of attempts) {
+        const res = await signIn(email, password);
+        assert.equal(res.status, 401, email);
+        assert.equal(cookieOf(res, "fl_admin"), "", `no session for ${email}`);
+        answers.push(await res.text());
+      }
+      assert.equal(new Set(answers).size, 1, "nothing in the answer tells these cases apart");
+    });
+
+    it("no password is stored: no staff table, not in the cookie, not in the audit log", async () => {
+      const exists = (await db.asSystem(() => db.query("SELECT to_regclass('admin_users') AS t"))).rows[0].t;
+      assert.equal(exists, null, "the adapter has no staff accounts table");
+      const ok = await signIn("staff@test.local", "staff-password-1");
+      const cookie = cookieOf(ok, "fl_admin");
+      const claims = crypto.verifyToken(cookie.split("=")[1]);
+      assert.ok(claims && claims.tok, "the session carries the LTX token");
+      assert.doesNotMatch(JSON.stringify(claims), /staff-password-1/);
+      const audit = (await db.asSystem(() => db.query("SELECT * FROM audit_log"))).rows;
+      assert.ok(audit.some((r) => r.action === "admin.login"));
+      assert.doesNotMatch(JSON.stringify(audit), /staff-password-1|wrong/);
+    });
+
+    it("the sign-in is forwarded to LTX exactly once", async () => {
+      const before = h.ltx.calls.login.length;
+      await signIn("tenant-admin@test.local", "tenant-password-1");
+      assert.equal(h.ltx.calls.login.length, before + 1);
+      assert.deepEqual(h.ltx.calls.login[before], { email: "tenant-admin@test.local", password: "tenant-password-1" });
+    });
+
+    it("the session ends the moment LTX revokes the account", async () => {
+      const ok = await signIn("tenant-admin@test.local", "tenant-password-1");
+      const cookie = cookieOf(ok, "fl_admin");
+      assert.equal((await fetch(`${BASE()}/admin`, { headers: { Cookie: cookie }, redirect: "manual" })).status, 200);
+      h.ltx.revoke("tenant-admin@test.local");
+      const after = await fetch(`${BASE()}/admin`, { headers: { Cookie: cookie }, redirect: "manual" });
+      assert.equal(after.status, 302);
+      assert.equal(after.headers.get("location"), "/admin/login");
+      assert.match(after.headers.getSetCookie().join(";"), /fl_admin=;.*Max-Age=0/, "the cookie is cleared");
+    });
+
+    it("when LTX is not reachable, sign-in and open sessions answer 503 and nobody is let in", async () => {
+      const ok = await signIn("staff@test.local", "staff-password-1");
+      const cookie = cookieOf(ok, "fl_admin");
+      h.ltx.state.down = true;
+      const login = await signIn("staff@test.local", "staff-password-1");
+      assert.equal(login.status, 503);
+      assert.equal(cookieOf(login, "fl_admin"), "");
+      assert.equal((await fetch(`${BASE()}/admin`, { headers: { Cookie: cookie }, redirect: "manual" })).status, 503);
     });
 
     it("the session cookie is HttpOnly, SameSite=Strict and limited to /admin", async () => {
-      await addStaff("cookie@test.local", "right-password-3");
-      const ok = await post("/admin/login", { email: "cookie@test.local", password: "right-password-3" });
+      const ok = await signIn("staff@test.local", "staff-password-1");
       const raw = ok.headers.getSetCookie().find((c) => c.startsWith("fl_admin="));
       assert.match(raw, /HttpOnly/);
       assert.match(raw, /SameSite=Strict/);
       assert.match(raw, /Path=\/admin/);
     });
 
-    it("two-factor: password alone is not enough, a wrong code is refused, each code works once", async () => {
-      await addStaff("tfa@test.local", "right-password-4");
-      const id = await idOf("tfa@test.local");
-      const { secret } = await users.beginEnrollment(id, "tfa@test.local");
-      assert.equal(await users.confirmEnrollment(id, "000000"), false, "enrolment needs a real code");
-      assert.equal(await users.confirmEnrollment(id, authenticator.generate(secret)), true);
-      const stored = (await db.asSystem(() => db.query("SELECT totp_secret FROM admin_users WHERE id = $1", [id]))).rows[0].totp_secret;
-      assert.ok(stored.startsWith("v1:") && !stored.includes(secret), "the secret is stored encrypted");
-
-      const step1 = await post("/admin/login", { email: "tfa@test.local", password: "right-password-4" });
-      assert.equal(step1.status, 200);
-      assert.equal(cookieOf(step1, "fl_admin"), "", "no session after the password step");
-      const pending = cookieOf(step1, "fl_admin_2fa");
-      assert.ok(pending);
-      assert.equal((await post("/admin/login/2fa", { code: "123456" }, pending)).status, 401);
-      // the code used to enrol was already accepted once, so it cannot be used again
-      assert.equal((await post("/admin/login/2fa", { code: authenticator.generate(secret) }, pending)).status, 401, "a used code is refused");
-      // the code of the next 30-second step is accepted, once
-      const next = authenticator.clone({ epoch: Date.now() + 30000 }).generate(secret);
-      const ok = await post("/admin/login/2fa", { code: next }, pending);
-      assert.equal(ok.status, 302);
-      assert.match(cookieOf(ok, "fl_admin"), /^fl_admin=.+/);
-      assert.equal((await post("/admin/login/2fa", { code: next }, pending)).status, 401, "replaying the accepted code fails");
-    });
-
-    it("wrong two-factor codes count towards the lock-out", async () => {
-      await addStaff("tfalock@test.local", "right-password-5");
-      const id = await idOf("tfalock@test.local");
-      const { secret } = await users.beginEnrollment(id, "tfalock@test.local");
-      await users.confirmEnrollment(id, authenticator.generate(secret));
-      const step1 = await post("/admin/login", { email: "tfalock@test.local", password: "right-password-5" });
-      const pending = cookieOf(step1, "fl_admin_2fa");
-      for (let i = 0; i < 3; i++) await post("/admin/login/2fa", { code: "111111" }, pending);
-      const row = (await db.asSystem(() => db.query("SELECT locked_until FROM admin_users WHERE id = $1", [id]))).rows[0];
-      assert.ok(row.locked_until && new Date(row.locked_until) > new Date(), "locked after three wrong codes");
-    });
-
-    it("when two-factor is required, a person without it can only reach the set-up page", async () => {
-      config.admin.require2fa = true;
-      await addStaff("must@test.local", "right-password-6");
-      const login = await post("/admin/login", { email: "must@test.local", password: "right-password-6" });
-      assert.equal(login.headers.get("location"), "/admin/security");
-      const cookie = cookieOf(login, "fl_admin");
-      const overview = await fetch(`${BASE()}/admin`, { headers: { Cookie: cookie }, redirect: "manual" });
-      assert.equal(overview.status, 302);
-      assert.equal(overview.headers.get("location"), "/admin/security");
-      assert.equal((await fetch(`${BASE()}/admin/payments`, { headers: { Cookie: cookie }, redirect: "manual" })).headers.get("location"), "/admin/security");
-      const page = await fetch(`${BASE()}/admin/security`, { headers: { Cookie: cookie } });
-      assert.equal(page.status, 200);
-      assert.match(await page.text(), /Set up two-factor/);
+    it("the local two-factor and security pages are gone", async () => {
+      const cookie = cookieOf(await signIn("staff@test.local", "staff-password-1"), "fl_admin");
+      assert.equal((await fetch(`${BASE()}/admin/security`, { headers: { Cookie: cookie }, redirect: "manual" })).status, 404);
+      assert.notEqual((await post("/admin/login/2fa", { code: "123456" })).status, 200);
     });
 
     it("idle timeout: a session unused for longer than the limit is signed out; an active one is kept and extended", async () => {
-      await addStaff("idle@test.local", "right-password-7");
-      const uid = await idOf("idle@test.local");
+      const real = crypto.verifyToken(cookieOf(await signIn("staff@test.local", "staff-password-1"), "fl_admin").split("=")[1]);
       const now = Math.floor(Date.now() / 1000);
-      const make = (last) => `fl_admin=${crypto.signToken({ typ: "admin", uid, iat: now - 60, last }, 3600)}`;
+      const make = (last) => `fl_admin=${crypto.signToken({ typ: "admin", uid: real.uid, iat: now - 60, last, tok: real.tok }, 3600)}`;
       const stale = await fetch(`${BASE()}/admin`, { headers: { Cookie: make(now - 31 * 60) }, redirect: "manual" });
       assert.equal(stale.status, 302);
       assert.match(stale.headers.get("location"), /^\/admin\/login/);
@@ -372,10 +352,16 @@ describe("security hardening", () => {
       assert.match(cookieOf(fresh, "fl_admin"), /^fl_admin=.+/, "cookie re-issued with a new activity time");
     });
 
+    it("a session cookie without an LTX token is refused", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const cookie = `fl_admin=${crypto.signToken({ typ: "admin", uid: "u-super", iat: now, last: now }, 3600)}`;
+      const res = await fetch(`${BASE()}/admin`, { headers: { Cookie: cookie }, redirect: "manual" });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.get("location"), "/admin/login");
+    });
+
     it("a state-changing form without a valid CSRF token is refused", async () => {
-      await addStaff("csrf@test.local", "right-password-8");
-      const login = await post("/admin/login", { email: "csrf@test.local", password: "right-password-8" });
-      const cookie = cookieOf(login, "fl_admin");
+      const cookie = cookieOf(await signIn("staff@test.local", "staff-password-1"), "fl_admin");
       assert.equal((await post("/admin/installations/1/status", { status: "suspended" }, cookie)).status, 403);
       assert.equal((await post("/admin/installations/1/status", { status: "suspended", _csrf: "deadbeef" }, cookie)).status, 403);
     });

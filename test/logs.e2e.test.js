@@ -26,7 +26,6 @@ describe("log contents", () => {
     const { runMigrations, syncEntityTypes } = require("../src/db/migrate");
     await runMigrations();
     await syncEntityTypes([require("../src/models/VideoSlot"), require("../src/models/VideoVersion"), require("../src/models/StoreSetting")]);
-    await require("../src/services/adminUserService").ensureBootstrapAdmin();
     db = require("../src/db/connection");
     httpServer = require("../src/app").createApp().listen(h.ADAPTER_PORT);
   });

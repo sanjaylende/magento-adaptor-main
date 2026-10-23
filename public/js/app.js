@@ -375,7 +375,7 @@ function renderRows() {
   const pageItems = paginate(vp);
   rowsEl.innerHTML = pageItems.map((p) => {
     const thumb = p.image
-      ? '<img src="' + escapeHtml(p.image) + '" class="thumb" />'
+      ? '<img src="' + escapeHtml(p.image) + '" class="thumb" alt="' + escapeHtml(p.name) + '" />'
       : '<div class="thumb-placeholder"></div>';
     const slots = VIDEO_TYPES.map((t) => ({ type: t, gen: generated[genKey(p.uniqueTag, t)] }));
     const hasAny = slots.some((s) => s.gen);
@@ -407,6 +407,8 @@ function renderRows() {
       '<td><button class="action-btn" data-action="open-product" data-tag="' + escapeHtml(p.uniqueTag) + '"' + (hasAny ? "" : ' data-open-modal="1"') + '>' + label + '</button></td>' +
     '</tr>' + changedDetailRow;
   }).join("");
+  // Products exist but the search or filters hide them all: say so (an empty list looked like a failure). The very first, still empty load is left as it was.
+  if (!pageItems.length && PRODUCTS.length) rowsEl.innerHTML = '<tr><td colspan="7" class="muted">No products match your search or filters.</td></tr>';
   renderPagination(vp.length);
 }
 
@@ -778,7 +780,7 @@ function renderVideoSlotList(product, slots) {
     const status = slotStatus(gen);
     const expanded = view.expandedType === s.type;
     const thumb = gen && gen.thumbnailUrl
-      ? '<img src="' + escapeHtml(gen.thumbnailUrl) + '" class="slot-card-thumb" />'
+      ? '<img src="' + escapeHtml(gen.thumbnailUrl) + '" class="slot-card-thumb" alt="" />'
       : '<div class="thumb-placeholder"></div>';
     const versionSuffix = gen && gen.versionNo ? ' · Version ' + gen.versionNo : '';
     const ratioSuffix = gen && gen.aspectRatio ? ' · <span class="ratio-inline">' + escapeHtml(gen.aspectRatio) + '</span>' : '';
@@ -846,7 +848,7 @@ function renderProductDetail(tag) {
   // app" (story criterion #1). The list row's thumbnail already
   // navigates here on click; this is the actual enlarge affordance.
   const thumb = product.image
-    ? '<img src="' + escapeHtml(product.image) + '" class="thumb enlargeable" data-action="enlarge-image" data-image-url="' + escapeHtml(product.image) + '" data-image-title="' + escapeHtml(product.name) + '" />'
+    ? '<img src="' + escapeHtml(product.image) + '" class="thumb enlargeable" data-action="enlarge-image" data-image-url="' + escapeHtml(product.image) + '" data-image-title="' + escapeHtml(product.name) + '" alt="' + escapeHtml(product.name) + '" />'
     : '<div class="thumb-placeholder"></div>';
 
   return '<button type="button" class="btn-text back-link" data-action="back-to-list">← Back to products</button>' +
@@ -2914,3 +2916,70 @@ setInterval(() => { if (view.mode === "list") renderRows(); }, 60000);
   if (deepLinkTag) navigate({ mode: "detail", tag: deepLinkTag });
 }
 
+// ---- Overlays (plan, generate, previews, versions): dialog role and name, focus in and back, Tab stays inside, Escape closes ----
+(function () {
+  const OVERLAYS = [ // page order is stacking order: the last one with content is on top
+    { id: "modalRoot", name: "Generate video", close: () => cancelModal() },
+    { id: "videoPreviewRoot", name: "Video preview", close: () => closeVideoPreview() },
+    { id: "versionsPanelRoot", name: "Versions", close: () => closeVersionsPanel() },
+    { id: "planModalRoot", name: "Plans and billing", close: () => closePlanModal() },
+    { id: "imagePreviewRoot", name: "Image preview", close: () => closeImagePreview() },
+  ];
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const isOpen = (o) => { const r = document.getElementById(o.id); return !!(r && r.firstElementChild); };
+  const topmost = () => { for (let i = OVERLAYS.length - 1; i >= 0; i--) if (isOpen(OVERLAYS[i])) return OVERLAYS[i]; return null; };
+  const dialogOf = (o) => document.getElementById(o.id).firstElementChild;
+  const wasOpen = {};
+  const openers = {};
+
+  function sync(o) {
+    const open = isOpen(o);
+    // First, so that focus can go back to the page behind a closing dialog: nothing behind an open dialog can be reached by keyboard or screen reader
+    const app = document.getElementById("appRoot");
+    if (app) app.inert = OVERLAYS.some(isOpen);
+    if (open) {
+      const dlg = dialogOf(o);
+      const heading = dlg.querySelector(".modal-header, h1, h2, h3");
+      dlg.setAttribute("role", "dialog");
+      dlg.setAttribute("aria-modal", "true");
+      dlg.setAttribute("aria-label", (heading && heading.textContent.trim()) || o.name);
+      dlg.tabIndex = -1;
+      const active = document.activeElement;
+      if (!wasOpen[o.id]) {
+        openers[o.id] = active;
+        const first = Array.from(dlg.querySelectorAll(FOCUSABLE)).find((el) => el.offsetParent !== null);
+        (first || dlg).focus();
+      } else if (!active || active === document.body) {
+        dlg.focus(); // a re-render replaced the element that had focus
+      }
+    } else if (wasOpen[o.id]) {
+      const opener = openers[o.id];
+      delete openers[o.id];
+      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
+    }
+    wasOpen[o.id] = open;
+  }
+
+  OVERLAYS.forEach((o) => {
+    const root = document.getElementById(o.id);
+    if (root) new MutationObserver(() => sync(o)).observe(root, { childList: true });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const top = topmost();
+    if (!top) return;
+    if (e.key === "Escape" && !e.defaultPrevented) {
+      e.preventDefault();
+      top.close();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const dlg = dialogOf(top);
+    const items = Array.from(dlg.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+    if (!items.length) { e.preventDefault(); dlg.focus(); return; }
+    const first = items[0], last = items[items.length - 1], active = document.activeElement;
+    if (!dlg.contains(active) || active === dlg) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+  });
+})();

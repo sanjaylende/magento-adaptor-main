@@ -102,6 +102,8 @@ no sign-in -> 401; unknown product -> 404; an uploaded picture used as frame 1 a
 
 1. Case `security`: the repo's live security journey against the running adapter (bad signature, replayed nonce, timestamps, body size limits, unknown fields, prototype pollution, SSRF refusals, store isolation of orders and videos, staff lock-out and CSRF, rate limiting of sessions).
 1b. Case `sqli`: 644 requests with 14 SQL-injection payloads (path, query, body, headers, file name, sign-in forms, staff console) must give no 5xx, no database or code text, no sleep delay, no dropped table or deleted row, and no sign-in by a boolean payload. Review and findings: `docs/security/SQL-INJECTION-REVIEW.md`.
+1c. Staff sign-in (Magento adapter, `test/security.e2e.test.js` H4): staff sign in with their LTX account against a pretend LTX (`test/fakeLtx.js`). An LTX superadmin and an admin of this tenant get in as `admin`; a wrong password, unknown e-mail, another tenant's admin and a non-admin LTX user all get the identical refusal and no cookie. The adapter keeps no staff table, and the password is not in the session cookie or the audit log. A session ends the moment LTX revokes the account; if LTX is down the answer is 503. The old local two-factor and My-security pages are gone. Idle timeout, cookie flags and CSRF still hold.
+1d. Internal token route (Magento adapter, `test/internalToken.e2e.test.js`): `GET /internal/magento-token/:shop` hands the store's Magento integration token to LTX only with the right `X-Internal-Secret` (`INTERNAL_API_SECRET`). A missing, wrong or misnamed secret, or one in the query string, is 401; with no secret configured everything is 401 (fail closed). An unknown, suspended or uninstalled store is 404 `not_installed`; a host with a scheme, path or odd characters is 400. Each hand-out is audited and the token never appears in the audit log.
 2. `npm test` (all unit and end-to-end tests of the adapter, including the security tests) must stay green.
 3. `npm run lint` clean; `npm run audit:prod` no high findings.
 4. PHP repos: every file compiles; the extension is checked against the installed Magento's interfaces.
@@ -110,7 +112,7 @@ Never weaken validation, rate limits, headers or signature checks to make a test
 ## T11 UI consistency (`cases/ui.js` plus manual review)
 
 Every merchant-app screen (no launch link, list, no search results, very long search text, detail with a ready video, generate dialog, dialog settings, long prompt, stills picker, plan dialog, payment history)
-and every staff-console screen (login, dashboard, merchants, payments, plans, audit, security) in Chrome and Firefox at 1400 px and 390 px: the screen is reached, no console errors or CSP violations,
+and every staff-console screen (login, dashboard, merchants, payments, plans, audit) in Chrome and Firefox at 1400 px and 390 px: the screen is reached, no console errors or CSP violations,
 no failed request, and on the phone nothing sticks out sideways. Screenshots are saved in `tests/regression/reports/ui/`; look at a few by eye and compare with the pre-change build.
 *Known issue.* FND-UI-1: on a 390 px phone the product list (filter row, table, search echo) is wider than the screen; a 300-character search term pushes the page 1300 px wide.
 

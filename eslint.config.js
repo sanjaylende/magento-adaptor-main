@@ -34,7 +34,7 @@ module.exports = [
   {
     // app.js and billing.js are two plain scripts of one page and share these top-level names.
     files: ["public/js/**/*.js"],
-    languageOptions: { globals: Object.fromEntries(["apiUrl", "escapeHtml", "openPlanModal", "renderUsageBadge", "refreshBilling", "isBillingBlocked", "GATE_MESSAGES"].map((n) => [n, "readonly"])) },
+    languageOptions: { globals: Object.fromEntries(["apiUrl", "escapeHtml", "openPlanModal", "closePlanModal", "renderUsageBadge", "refreshBilling", "isBillingBlocked", "GATE_MESSAGES"].map((n) => [n, "readonly"])) },
     rules: { "no-redeclare": ["error", { builtinGlobals: false }] },
   },
   {

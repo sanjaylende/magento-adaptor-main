@@ -45,6 +45,14 @@ async function getInstallationByKey(installKey) {
   return value;
 }
 
+// The active installation whose store address is this host (host or host:port, no path): for the internal token route. Not cached:
+// the token is handed out from it, so a suspended or uninstalled store must stop at once.
+async function getActiveInstallationByHost(host) {
+  const h = String(host || "").toLowerCase();
+  const { rows: [row] } = await asSystem(() => query("SELECT * FROM installations WHERE status = 'active' AND base_url IN ($1, $2) ORDER BY id DESC LIMIT 1", [`https://${h}`, `http://${h}`]));
+  return row ? mapInstallation(row) : null;
+}
+
 const invalidateInstallation = (installKey) => installationCache.delete(installKey);
 
 async function getInstallation(id) {
@@ -179,6 +187,6 @@ async function getStoreSettings(storeId) {
 }
 
 module.exports = {
-  httpError, getInstallationByKey, getInstallation, getInstallationAndStore, getStore, getStoreById, listStores, syncStores,
+  httpError, getInstallationByKey, getActiveInstallationByHost, getInstallation, getInstallationAndStore, getStore, getStoreById, listStores, syncStores,
   registerInstallation, touchInstallation, markUninstalled, magentoConfigFor, getStoreSettings,
 };

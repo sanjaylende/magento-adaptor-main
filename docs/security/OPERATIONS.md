@@ -42,6 +42,6 @@ check catches a changed file). **The time on production depends on the data size
 7. **Learn.** Write up cause, timeline and fix. Add a test or an alert so it cannot repeat.
 
 ## Staff accounts
-- Two-factor is mandatory in production (`ADMIN_REQUIRE_2FA` defaults on). Lost phone: `node scripts/reset-2fa.js person@company.com` (needs server access).
-- An account locks for `ADMIN_LOCK_MINUTES` (15) after `ADMIN_MAX_FAILED_LOGINS` (5) failures; the unlock is automatic.
+- Staff sign in with their LTX account (superadmins, and admins of `FLIPICK_TENANT_ID`); the adapter stores no staff passwords, two-factor secrets or lock counters. Password change, lock-out, two-factor and removing a person are done in LTX, and take effect on the next page load (the session re-checks LTX on every request). If LTX is unreachable the console answers 503.
+- Per-IP limit on the sign-in form stays here (`admin-login`).
 - Sessions end after `ADMIN_IDLE_MINUTES` (30) of inactivity and after `ADMIN_SESSION_HOURS` (8) in any case.

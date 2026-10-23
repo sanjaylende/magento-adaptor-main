@@ -13,7 +13,6 @@ const VideoVersion = require("./models/VideoVersion");
 const StoreSetting = require("./models/StoreSetting");
 const videoVersions = require("./repositories/VideoVersionRepository");
 const scheduler = require("./services/scheduler");
-const adminUsers = require("./services/adminUserService");
 const { assertSafeConfig } = require("./config/safety");
 
 function createApp() {
@@ -59,7 +58,6 @@ async function start() {
   assertSafeConfig(); // production only: refuses the ICICI test (UAT) address, plain-HTTP address, development passwords
   await runMigrations();
   await syncEntityTypes([VideoSlot, VideoVersion, StoreSetting]);
-  await adminUsers.ensureBootstrapAdmin();
   await videoVersions.sweepAfterRestart();
   scheduler.start();
   createServer().listen(config.port, () => {

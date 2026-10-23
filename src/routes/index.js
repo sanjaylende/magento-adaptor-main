@@ -15,6 +15,8 @@ const webhook = require("../controllers/webhookController");
 const image = require("../controllers/imageController");
 const stills = require("../controllers/stillImageController");
 const billing = require("../controllers/billingController");
+const internal = require("../controllers/internalController");
+const { requireInternalSecret } = require("../middleware/internalSecret");
 const paymentWeb = require("../controllers/paymentWebController");
 const invoice = require("../controllers/invoiceController");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -53,6 +55,9 @@ router.get("/img/:token", perIp("img", 600), validate({ params: S.params.token }
 // Photos uploaded in the stills picker, fetched by the video engine and the browser through a signed link.
 router.get("/up/:token", perIp("up", 600), validate({ params: S.params.token }), h(stills.serve));
 router.post("/api/webhooks/video-engine", perIp("engine-webhook", 300), limitBody(16 * 1024), validate({ body: S.body.videoEngineWebhook }), h(webhook.videoEngine));
+
+// ---- Internal, server to server (shared secret, X-Internal-Secret): LTX fetches a store's Magento token ----
+router.get("/internal/magento-token/:shop", perIp("internal-token", 60), requireInternalSecret, validate({ params: S.params.shopHost }), h(internal.magentoToken));
 
 // ---- Extension, server to server (signed): no store needed ----
 const signedOnly = [tenantAuth({ requireStore: false }), perInstallation(300)];

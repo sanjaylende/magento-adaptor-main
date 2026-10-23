@@ -65,6 +65,7 @@ const params = {
   tag: z.object({ uniqueTag: tag }),
   token: z.object({ token: signedToken }),
   gateway: z.object({ gateway }),
+  shopHost: z.object({ shop: z.string().regex(/^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$/, "must be a store host name (and port), without http:// or a path") }),
   orderId: z.object({ id: z.string().regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, "must be an order id (UUID)") }),
   invoiceId: z.object({ id: z.string().regex(/^[0-9]{1,18}$/, "must be an invoice number (digits)") }),
   overlayName: z.object({ name: text(200, 1) }),
@@ -92,8 +93,6 @@ const admin = {
   planPrice: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), interval: z.enum(["monthly", "annual"]), currency: z.enum(["USD", "INR"]), amount: money, budget: money }),
   planRate: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), type: z.enum(VIDEO_TYPE_KEYS), rate: money }),
   login: z.strictObject({ email: text(254), password: text(200) }),
-  code: z.strictObject({ code: text(10) }),
-  codeCsrf: z.strictObject({ _csrf: text(200), code: text(10) }),
   paymentsFilter: z.object({ status: blankToUndefined(z.enum(["pending", "paid", "failed", "refunded", "partially_refunded", "canceled", "expired"])) }),
 };
 

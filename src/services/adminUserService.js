@@ -1,111 +1,60 @@
-// Flipick staff accounts for the admin console. Passwords are stored as scrypt hashes.
-// Sign-in protections: lock-out after repeated failures (password or two-factor code), TOTP two-factor with single-use codes,
-// and the same work for unknown and known e-mail addresses so the response time does not reveal which accounts exist.
-const crypto = require("crypto");
-const { authenticator } = require("otplib");
+// Staff sign-in for the admin console is delegated to LTX (the Flipick video engine): this service keeps no staff accounts, passwords,
+// two-factor secrets or lock-out counters. The e-mail and password typed on the sign-in page are forwarded once to LTX's
+// POST /api/v1/auth/login and dropped; only the token LTX returns is kept, inside the signed session cookie (see src/admin/routes.js).
+// Every /admin request re-checks that token with LTX's GET /api/v1/auth/me, so access ends the moment LTX revokes it (password change,
+// deactivation, role change), not at the next cookie expiry. Same approach as the Shopify adapter's /admin.
 const config = require("../config");
 const logger = require("../utils/logger");
-const { query, asSystem } = require("../db/connection");
-const { safeEqual, encrypt, decrypt } = require("../utils/crypto");
 
-authenticator.options = { window: 1, step: 30, digits: 6 }; // accept the previous and next 30-second code (clock drift)
+const TIMEOUT_MS = 8000;
+const base = () => String(config.admin.authBaseUrl || "").replace(/\/+$/, "");
 
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  return `scrypt:${salt}:${crypto.scryptSync(password, salt, 64).toString("hex")}`;
+// Flipick superadmins always; an LTX tenant admin only for THIS deployment's own tenant (FLIPICK_TENANT_ID). Both become the console's
+// 'admin' role: LTX has no read-only 'support' equivalent, so nobody else gets in.
+function gateAllows(user) {
+  if (!user) return false;
+  if (user.role === "superadmin") return true;
+  return user.role === "admin" && !!config.flipick.tenantId && String(user.tenant_id) === String(config.flipick.tenantId);
 }
 
-function verifyPassword(password, stored) {
-  const [scheme, salt, hash] = String(stored).split(":");
-  return scheme === "scrypt" && safeEqual(hashPassword(password, salt), `scrypt:${salt}:${hash}`);
+const staffOf = (u) => ({ id: String(u.id), email: String(u.email), role: "admin" });
+
+async function ltx(path, init) {
+  if (!base()) throw new Error("FLIPICK_VIDEO_ENGINE_BASE_URL (or ADMIN_AUTH_BASE_URL) is not set");
+  return fetch(`${base()}${path}`, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
 }
 
-const DUMMY_HASH = hashPassword(crypto.randomBytes(12).toString("hex"));
-const publicUser = (u) => ({ id: u.id, email: u.email, role: u.role, totpEnabled: !!u.totp_enabled });
-
-// A failed password or code: count it, and lock the account once the limit is reached.
-async function recordFailure(user) {
-  const { maxFailedLogins, lockMinutes } = config.admin;
-  const { rows: [row] } = await asSystem(() => query(
-    `UPDATE admin_users SET failed_attempts = failed_attempts + 1,
-            locked_until = CASE WHEN failed_attempts + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE locked_until END
-      WHERE id = $1 RETURNING failed_attempts, locked_until`,
-    [user.id, maxFailedLogins, lockMinutes]
-  ));
-  if (row.failed_attempts >= maxFailedLogins) logger.warn("Staff account locked after repeated failed sign-ins", { email: user.email, minutes: lockMinutes });
-  return row;
-}
-
-const clearFailures = (id) => asSystem(() => query("UPDATE admin_users SET failed_attempts = 0, locked_until = NULL WHERE id = $1", [id]));
-
-// -> { status: "ok", user } | { status: "invalid" } | { status: "locked" }. "invalid" is returned for an unknown e-mail too.
+// -> { status: "ok", user, token } | { status: "invalid" } | { status: "unavailable" }.
+// "invalid" covers a wrong password, an unknown e-mail, an LTX lock-out and an account that may not use the console alike.
 async function login(email, password) {
-  const { rows: [user] } = await asSystem(() => query("SELECT * FROM admin_users WHERE lower(email) = lower($1) AND is_active", [String(email || "")]));
-  const passwordOk = verifyPassword(String(password || ""), user ? user.password_hash : DUMMY_HASH);
-  if (!user) return { status: "invalid" };
-  if (user.locked_until && new Date(user.locked_until) > new Date()) return { status: "locked", user: publicUser(user) };
-  if (!passwordOk) {
-    await recordFailure(user);
-    return { status: "invalid", user: publicUser(user) };
+  try {
+    const res = await ltx("/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: String(email || ""), password: String(password || "") }),
+    });
+    if (res.status >= 500) return { status: "unavailable" };
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.token || !gateAllows(body.user)) return { status: "invalid" };
+    return { status: "ok", user: staffOf(body.user), token: String(body.token) };
+  } catch (err) {
+    logger.error("Staff sign-in: LTX is not reachable:", err.message);
+    return { status: "unavailable" };
   }
-  // For accounts with two-factor the counter is reset only after the code is accepted too, see verifyTotp.
-  if (!user.totp_enabled) await clearFailures(user.id);
-  return { status: "ok", user: publicUser(user) };
 }
 
-async function getById(id) {
-  const { rows: [user] } = await asSystem(() => query("SELECT id, email, role, totp_enabled FROM admin_users WHERE id = $1 AND is_active", [id]));
-  return user ? publicUser(user) : null;
-}
-
-// ---- Two-factor (TOTP, RFC 6238: works with Google Authenticator, Microsoft Authenticator, Authy, 1Password ...) ----
-
-const normaliseCode = (code) => String(code || "").replace(/\s+/g, "");
-
-// Checks a code for an enrolled user. Each 30-second code can be used once (the last accepted step is stored).
-async function verifyTotp(userId, code) {
-  const { rows: [user] } = await asSystem(() => query("SELECT * FROM admin_users WHERE id = $1 AND is_active AND totp_enabled", [userId]));
-  if (!user) return { ok: false };
-  if (user.locked_until && new Date(user.locked_until) > new Date()) return { ok: false, locked: true };
-  const delta = /^\d{6}$/.test(normaliseCode(code)) ? authenticator.checkDelta(normaliseCode(code), decrypt(user.totp_secret)) : null;
-  if (delta === null || delta === undefined) {
-    await recordFailure(user);
-    return { ok: false };
+// Checks a session's LTX token. -> { status: "ok", user } | { status: "invalid" } | { status: "unavailable" }
+async function verifySession(token) {
+  try {
+    const res = await ltx("/api/v1/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status >= 500) return { status: "unavailable" };
+    if (!res.ok) return { status: "invalid" };
+    const user = await res.json().catch(() => null);
+    return gateAllows(user) ? { status: "ok", user: staffOf(user) } : { status: "invalid" };
+  } catch (err) {
+    logger.error("Staff session check: LTX is not reachable:", err.message);
+    return { status: "unavailable" };
   }
-  const step = Math.floor(Date.now() / 30000) + delta;
-  const used = await asSystem(() => query("UPDATE admin_users SET totp_last_step = $2 WHERE id = $1 AND totp_last_step < $2", [user.id, step]));
-  if (!used.rowCount) return { ok: false, reused: true }; // the same code was already used
-  await clearFailures(user.id);
-  return { ok: true };
 }
 
-// Step 1 of enrolment: make a secret (stored encrypted, not yet active) and return what the authenticator app needs.
-async function beginEnrollment(userId, email) {
-  const secret = authenticator.generateSecret(20);
-  await asSystem(() => query("UPDATE admin_users SET totp_secret = $2, totp_enabled = FALSE, totp_last_step = 0 WHERE id = $1", [userId, encrypt(secret)]));
-  return { secret, uri: authenticator.keyuri(email, "Flipick Video Admin", secret) };
-}
-
-// Step 2: the person types the first code their app shows; only then is two-factor switched on.
-async function confirmEnrollment(userId, code) {
-  const { rows: [user] } = await asSystem(() => query("SELECT totp_secret FROM admin_users WHERE id = $1 AND is_active AND NOT totp_enabled AND totp_secret IS NOT NULL", [userId]));
-  if (!user || !/^\d{6}$/.test(normaliseCode(code))) return false;
-  const delta = authenticator.checkDelta(normaliseCode(code), decrypt(user.totp_secret));
-  if (delta === null || delta === undefined) return false;
-  await asSystem(() => query("UPDATE admin_users SET totp_enabled = TRUE, totp_last_step = $2 WHERE id = $1", [userId, Math.floor(Date.now() / 30000) + delta]));
-  return true;
-}
-
-// Creates the first admin from ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD when there are no staff accounts yet.
-async function ensureBootstrapAdmin() {
-  const { bootstrapEmail, bootstrapPassword } = config.admin;
-  const { rows: [{ n }] } = await asSystem(() => query("SELECT count(*)::int AS n FROM admin_users"));
-  if (n > 0) return;
-  if (!bootstrapEmail || !bootstrapPassword) {
-    logger.warn("No staff accounts exist. Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD to create the first admin.");
-    return;
-  }
-  await asSystem(() => query("INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, 'admin')", [bootstrapEmail, hashPassword(bootstrapPassword)]));
-  logger.info(`Created first staff admin ${bootstrapEmail}`);
-}
-
-module.exports = { login, getById, ensureBootstrapAdmin, hashPassword, verifyTotp, beginEnrollment, confirmEnrollment };
+module.exports = { login, verifySession, gateAllows };

@@ -21,7 +21,6 @@ describe("platform", () => {
     const { runMigrations, syncEntityTypes } = require("../src/db/migrate");
     await runMigrations();
     await syncEntityTypes([require("../src/models/VideoSlot"), require("../src/models/VideoVersion"), require("../src/models/StoreSetting")]);
-    await require("../src/services/adminUserService").ensureBootstrapAdmin();
     db = require("../src/db/connection");
     billing = require("../src/services/billingService");
     payments = require("../src/services/paymentService");

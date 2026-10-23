@@ -19,14 +19,11 @@ module.exports = {
   // 32-byte hex key: encrypts installation secrets and Magento tokens at rest, and signs UI session tokens.
   secretKey: process.env.ADAPTER_SECRET_KEY || "",
   admin: {
-    bootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL || "",
-    bootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD || "",
-    maxFailedLogins: Number(process.env.ADMIN_MAX_FAILED_LOGINS || 5),   // consecutive failures before the account is locked
-    lockMinutes: Number(process.env.ADMIN_LOCK_MINUTES || 15),
+    // Staff sign in with their LTX account (see src/services/adminUserService.js): no staff passwords are stored here. Defaults to the
+    // video engine address, the same LTX that holds the accounts.
+    authBaseUrl: process.env.ADMIN_AUTH_BASE_URL || process.env.FLIPICK_VIDEO_ENGINE_BASE_URL || "",
     idleMinutes: Number(process.env.ADMIN_IDLE_MINUTES || 30),            // signed out after this long without a request
     sessionHours: Number(process.env.ADMIN_SESSION_HOURS || 8),           // absolute limit, however active
-    // Two-factor is mandatory in production: a staff member without it can only reach the enrolment page.
-    require2fa: process.env.ADMIN_REQUIRE_2FA != null && process.env.ADMIN_REQUIRE_2FA !== "" ? /^(1|true|yes)$/i.test(process.env.ADMIN_REQUIRE_2FA) : process.env.NODE_ENV === "production",
   },
   billing: {
     graceDays: Number(process.env.BILLING_GRACE_DAYS || 3),
@@ -52,6 +49,8 @@ module.exports = {
   // Flipick video engine / VVP backend.
   // Shared secret the video engine sends in X-Webhook-Secret on its callback; empty = the callback is accepted unsigned.
   videoEngineWebhookSecret: process.env.VIDEO_ENGINE_WEBHOOK_SECRET || "",
+  // Shared secret for server-to-server calls between LTX and this adapter (X-Internal-Secret header, see src/middleware/internalSecret.js); empty = such calls are refused.
+  internalApiSecret: process.env.INTERNAL_API_SECRET || "",
   flipick: {
     baseUrl: process.env.FLIPICK_SPONSORED_ADS_BASE_URL,
     videoEngineBaseUrl: process.env.FLIPICK_VIDEO_ENGINE_BASE_URL,

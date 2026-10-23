@@ -22,9 +22,6 @@ function productionProblems(env = process.env) {
   } else if (String(env.DB_SSL || "disable") !== "require" && !/@(127\.0\.0\.1|localhost|\[::1\])[:/]/.test(String(env.DATABASE_URL || ""))) {
     problems.push("DB_SSL=require is needed when the database is on another host.");
   }
-  if (env.ADMIN_BOOTSTRAP_PASSWORD && String(env.ADMIN_BOOTSTRAP_PASSWORD).length < 12) {
-    problems.push("ADMIN_BOOTSTRAP_PASSWORD is shorter than 12 characters.");
-  }
   for (const name of ["ICICI_PG_MERCHANT_ID", "ICICI_PG_AGGREGATOR_ID", "ICICI_PG_SECRET_KEY"]) {
     if (!env[name]) problems.push(`${name} must be set in production.`);
   }

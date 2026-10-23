@@ -1,12 +1,12 @@
 // Security behaviour of a RUNNING adapter (HTTP only, like an attacker or a broken client would see it).
 // Usage: node test-journeys/security-live.js [baseUrl]        default http://localhost:4200
-// It registers two throwaway installations against a fake Magento (started here on port 45124), creates a throwaway staff user, runs the
-// checks and removes the staff user at the end. The installations are suspended afterwards. Development mode is assumed: private
+// It registers two throwaway installations against a fake Magento (started here on port 45124), signs in as staff through LTX (the pretend LTX of
+// the regression stack, test/fakeLtx.js; against a real LTX set QA_STAFF_EMAIL / QA_STAFF_PASSWORD), runs the
+// checks and suspends the installations afterwards. Development mode is assumed: private
 // store addresses are allowed there on purpose, so SSRF address blocking is covered by test/ssrf.test.js and the production-mode smoke.
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const h = require("../test/helpers");
-const adminUsers = require("../src/services/adminUserService");
 
 const BASE = (process.argv[2] || "http://localhost:4200").replace(/\/+$/, "");
 const results = [];
@@ -19,8 +19,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   const fake = await h.startFakeMagento();
-  const staffEmail = `sec-live-${Date.now()}@test.local`;
-  const staffPassword = `Live-${crypto.randomBytes(6).toString("hex")}-pw`;
+  const staffEmail = process.env.QA_STAFF_EMAIL || "staff@test.local";
+  const staffPassword = process.env.QA_STAFF_PASSWORD || "staff-password-1";
   const created = [];
   try {
     // ---- two merchants (two separate installations), one signed client each ----
@@ -90,20 +90,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const stolen = await fetch(`${BASE}/api/bootstrap`, { headers: { Authorization: `Bearer ${sessA.slice(0, -4)}abcd` } });
     check("a session token with a changed signature is refused (401)", stolen.status === 401);
 
-    // ---- staff console: lock-out and CSRF ----
-    psql(`INSERT INTO admin_users (email, password_hash, role) VALUES ('${staffEmail}', '${adminUsers.hashPassword(staffPassword)}', 'admin')`);
-    await sleep(100);
+    // ---- staff console: sign-in through LTX and CSRF ----
     psql("DELETE FROM rate_limits WHERE bucket LIKE 'admin-login:%'");
-    let lastWrong;
-    for (let i = 1; i <= 6; i++) lastWrong = await form("/admin/login", { email: staffEmail, password: `wrong-${i}` });
-    const rightWhileLocked = await form("/admin/login", { email: staffEmail, password: staffPassword });
-    const lockedUntil = psql(`SELECT locked_until > now() FROM admin_users WHERE email = '${staffEmail}'`);
-    check("six wrong passwords lock the account; the right password is then refused", lockedUntil === "t" && rightWhileLocked.status === 401 && !cookieOf(rightWhileLocked, "fl_admin"), `locked=${lockedUntil}, right-password status ${rightWhileLocked.status}`);
-    psql(`UPDATE admin_users SET locked_until = NULL, failed_attempts = 0 WHERE email = '${staffEmail}'`);
+    const wrongs = [];
+    for (let i = 1; i <= 6; i++) wrongs.push(await form("/admin/login", { email: staffEmail, password: `wrong-${i}` }));
+    const noStaffTable = psql("SELECT to_regclass('admin_users') IS NULL");
+    check("six wrong passwords are each refused (401, no session cookie); the adapter keeps no staff accounts table", wrongs.every((r) => r.status === 401 && !cookieOf(r, "fl_admin")) && noStaffTable === "t", `statuses ${wrongs.map((r) => r.status).join(",")}, no table=${noStaffTable}`);
     psql("DELETE FROM rate_limits WHERE bucket LIKE 'admin-login:%'");
     const login = await form("/admin/login", { email: staffEmail, password: staffPassword });
     const cookie = cookieOf(login, "fl_admin");
-    check("after the lock is lifted the right password signs in", login.status === 302 && !!cookie);
+    check("the right LTX credentials sign in", login.status === 302 && !!cookie);
     const noCsrf = await form("/admin/installations/1/status", { status: "suspended" }, cookie);
     const badCsrf = await form("/admin/installations/1/status", { status: "suspended", _csrf: "deadbeef" }, cookie);
     const stateAfter = psql("SELECT status FROM installations WHERE id = 1");
@@ -120,7 +116,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     }
     check("hammering /api/session triggers the rate limit (429 with Retry-After)", !!blocked && !!blocked.headers.get("retry-after"), blocked ? `after ${count} requests, Retry-After ${blocked.headers.get("retry-after")}s` : "never limited");
   } finally {
-    try { psql(`DELETE FROM admin_users WHERE email = '${staffEmail}'`); psql("DELETE FROM rate_limits"); } catch (err) { console.log("cleanup:", err.message.split("\n")[0]); }
+    try { psql("DELETE FROM rate_limits"); } catch (err) { console.log("cleanup:", err.message.split("\n")[0]); }
     try { for (const key of created) psql(`UPDATE installations SET status = 'suspended' WHERE install_key = '${key}'`); } catch (err) { console.log("cleanup:", err.message.split("\n")[0]); }
     fake.close();
   }

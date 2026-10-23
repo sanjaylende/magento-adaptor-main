@@ -98,7 +98,7 @@ module.exports = async function ui({ stack, run, connectStore, waitStatus, repor
       // staff console
       await step('11-admin-login', async () => { await page.goto(`${BASE}/admin/login`, { waitUntil: 'networkidle' }); });
       await step('12-admin-dashboard', async () => { await page.fill('input[name="email"]', stack.staff.email); await page.fill('input[name="password"]', stack.staff.password); await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle' }), page.click('form button')]); });
-      for (const [n, p] of [['13-admin-merchants', '/admin/merchants'], ['14-admin-payments', '/admin/payments'], ['15-admin-plans', '/admin/plans'], ['16-admin-audit', '/admin/audit'], ['17-admin-security', '/admin/security']]) {
+      for (const [n, p] of [['13-admin-merchants', '/admin/merchants'], ['14-admin-payments', '/admin/payments'], ['15-admin-plans', '/admin/plans'], ['16-admin-audit', '/admin/audit']]) {
         await step(n, async () => { await page.goto(BASE + p, { waitUntil: 'networkidle' }); });
       }
       await ctx.close();

@@ -21,7 +21,6 @@ describe("input validation", () => {
     const { runMigrations, syncEntityTypes } = require("../src/db/migrate");
     await runMigrations();
     await syncEntityTypes([require("../src/models/VideoSlot"), require("../src/models/VideoVersion"), require("../src/models/StoreSetting")]);
-    await require("../src/services/adminUserService").ensureBootstrapAdmin();
     db = require("../src/db/connection");
     httpServer = require("../src/app").createApp().listen(h.ADAPTER_PORT);
     const r = await h.api("POST", "/api/v1/register", { body: { baseUrl: `http://127.0.0.1:${h.MAGENTO_PORT}`, magentoToken: "good-token", merchantName: "Validation Test", contactEmail: "v@test.local", countryCode: "IN" } });

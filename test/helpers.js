@@ -12,6 +12,7 @@ async function resetDatabase() {
   // Payments go to a pretend ICICI bank, never to the real sandbox (see test/fakeIcici.js). Installed here, before the app is loaded,
   // so the app's own settings (log level and so on) are not read too early.
   if (!module.exports.icici) module.exports.icici = require("./fakeIcici").install();
+  if (!module.exports.ltx) module.exports.ltx = require("./fakeLtx").start();
   const admin = new Client({ connectionString: `${OWNER}/postgres` });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)`);
@@ -27,8 +28,8 @@ function useTestEnvironment() {
     PORT: String(ADAPTER_PORT),
     PUBLIC_BASE_URL: `http://127.0.0.1:${ADAPTER_PORT}`,
     ...require("./fakeIcici").ENV,
-    ADMIN_BOOTSTRAP_EMAIL: "staff@test.local",
-    ADMIN_BOOTSTRAP_PASSWORD: "staff-password-1",
+    ...require("./fakeLtx").ENV, // staff sign in against a pretend LTX (test/fakeLtx.js), never a real one
+    INTERNAL_API_SECRET: crypto.randomBytes(16).toString("hex"), // a fresh made-up secret for each test run: the secret of /internal/* routes
     BILLING_GRACE_DAYS: "3",
     GST_RATE_BP: "1800",
     NODE_ENV: "test",

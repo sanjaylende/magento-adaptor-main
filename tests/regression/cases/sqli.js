@@ -11,11 +11,11 @@ module.exports = async function sqli({ stack, run, connectStore }) {
   run.section('T10b', 'SQL injection: payloads in path, query, body, headers, file name, sign-in and staff console');
   const c = await connectStore(stack, { name: 'Injection Store' });
   const tag = (await c.get('/api/products')).body.products[0].uniqueTag;
-  const tables = ['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders', 'usage_events', 'admin_users', 'rate_limits', 'video_versions'];
+  const tables = ['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders', 'usage_events', 'rate_limits', 'video_versions'];
   const exists = async () => (await stack.db("select table_name from information_schema.tables where table_schema = 'public' and table_name = any($1)", [tables])).map((r) => r.table_name).sort();
   const countsOf = async (names) => { const o = {}; for (const t of names) o[t] = Number((await stack.db(`select count(*)::int as n from ${t}`))[0].n); return o; };
   const present = await exists();
-  const before = await countsOf(['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders', 'admin_users'].filter((t) => present.includes(t)));
+  const before = await countsOf(['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders'].filter((t) => present.includes(t)));
   const problems = [], slowOnce = [];
   let sent = 0;
   const send = async (label, method, path, { headers = {}, body, auth = true, raw } = {}) => {
@@ -80,7 +80,6 @@ module.exports = async function sqli({ stack, run, connectStore }) {
     // sign-in forms of the staff console
     const login = await send('admin login', 'POST', '/admin/login', { auth: false, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, raw: `email=${enc(p)}&password=${enc(p)}` });
     if (login && login.status === 302 && !/login/.test(login.headers.get('location') || '')) problems.push(`admin login accepted a payload: ${p}`);
-    await send('admin login 2fa', 'POST', '/admin/login/2fa', { auth: false, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, raw: `code=${enc(p)}` });
     await send('admin payments filter', 'GET', `/admin/payments?status=${enc(p)}`, { auth: false });
     await send('admin ids', 'GET', `/admin/stores/${enc(p)}`, { auth: false });
   }
