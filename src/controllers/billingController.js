@@ -12,7 +12,8 @@ function fail(res, err, where = "billing") {
   const status = Number(err.status) >= 400 && Number(err.status) < 600 ? Number(err.status) : 500;
   if (status >= 500) logger.error(`${where} failed`, { error: err });
   else logger.warn(`${where} refused`, { status, reason: err.message });
-  res.status(status).json({ error: err.userMessage || (status < 500 ? err.message : "Something went wrong. Please try again.") });
+  const code = err.userMessage && /^[a-z_]+$/.test(String(err.code)) ? { code: err.code } : {};
+  res.status(status).json({ error: err.userMessage || (status < 500 ? err.message : "Something went wrong. Please try again."), ...code });
 }
 
 async function merchantCountry() {
@@ -50,7 +51,7 @@ async function orderStatus(req, res) {
     if (order.status === "pending") {
       // The gateway is asked directly; this is what turns a completed payment into an active plan even when the callback is late.
       try {
-        await payments.confirmWithGateway(order);
+        await payments.confirmWithGatewayThrottled(order);
       } catch (err) {
         // still pending is a valid answer, but say why the gateway could not be asked
         logger.warn("Gateway status check failed; order stays pending", { orderId: order.id, error: err.message });
@@ -60,6 +61,19 @@ async function orderStatus(req, res) {
     res.json({ id: fresh.id, status: fresh.status, failureReason: fresh.failureReason, kind: fresh.kind });
   } catch (err) {
     fail(res, err, "order status");
+  }
+}
+
+// Cancels one of THIS store's unpaid orders (the merchant changed their mind while the bank page is open). The bank is asked first and a
+// payment it reports as paid is recorded as paid, not canceled (409, code already_paid): see paymentService.cancelOrder.
+async function cancelOrder(req, res) {
+  try {
+    const order = await payments.getOrder(req.params.id);
+    if (!order || order.storeId !== tenant().store.id) return res.status(404).json({ error: "Order not found" });
+    const result = await payments.cancelOrder({ orderId: order.id, actor: { type: "merchant", id: tenant().installation.id } });
+    res.json({ id: result.order.id, status: result.order.status, outcome: result.outcome });
+  } catch (err) {
+    fail(res, err, "cancel payment");
   }
 }
 
@@ -92,4 +106,4 @@ async function invoiceLink(req, res) {
   }
 }
 
-module.exports = { status, checkout, orderStatus, cancel, history, invoiceLink };
+module.exports = { status, checkout, orderStatus, cancelOrder, cancel, history, invoiceLink };

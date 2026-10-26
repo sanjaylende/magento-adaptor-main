@@ -89,7 +89,7 @@ const admin = {
   credit: z.strictObject({ _csrf: text(200), usd: money, note: blankToUndefined(text(300)) }),
   activatePlan: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), interval: z.enum(["monthly", "annual"]), currency: z.enum(["USD", "INR"]), note: blankToUndefined(text(300)) }),
   csrfOnly: z.strictObject({ _csrf: text(200) }),
-  refund: z.strictObject({ _csrf: text(200), amount: money, reason: blankToUndefined(text(500)), entitlement: blankToUndefined(z.enum(["none", "cancel_plan", "remove_credit"])) }),
+  refund: z.strictObject({ _csrf: text(200), amount: money, reason: blankToUndefined(text(500)), entitlement: blankToUndefined(z.enum(["none", "cancel_plan", "remove_credit"])), idem: blankToUndefined(text(80)) }),
   planPrice: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), interval: z.enum(["monthly", "annual"]), currency: z.enum(["USD", "INR"]), amount: money, budget: money }),
   planRate: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), type: z.enum(VIDEO_TYPE_KEYS), rate: money }),
   login: z.strictObject({ email: text(254), password: text(200) }),

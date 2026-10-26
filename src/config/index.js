@@ -27,6 +27,8 @@ module.exports = {
   },
   billing: {
     graceDays: Number(process.env.BILLING_GRACE_DAYS || 3),
+    // The Plans & Billing dialog polls an order every few seconds while the bank page is open; the bank is asked about it at most this often.
+    orderCheckMinIntervalMs: Number.isFinite(Number(process.env.BILLING_ORDER_CHECK_MIN_INTERVAL_MS)) && process.env.BILLING_ORDER_CHECK_MIN_INTERVAL_MS !== "" && process.env.BILLING_ORDER_CHECK_MIN_INTERVAL_MS != null ? Math.max(0, Number(process.env.BILLING_ORDER_CHECK_MIN_INTERVAL_MS)) : 10000,
     reminderDays: Number(process.env.BILLING_REMINDER_DAYS || 5),
     // GST on INR invoices to Indian merchants, in basis points. PLACEHOLDER: confirm with your accountant.
     gstRateBp: Number(process.env.GST_RATE_BP || 1800),

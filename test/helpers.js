@@ -31,6 +31,7 @@ function useTestEnvironment() {
     ...require("./fakeLtx").ENV, // staff sign in against a pretend LTX (test/fakeLtx.js), never a real one
     INTERNAL_API_SECRET: crypto.randomBytes(16).toString("hex"), // a fresh made-up secret for each test run: the secret of /internal/* routes
     BILLING_GRACE_DAYS: "3",
+    BILLING_ORDER_CHECK_MIN_INTERVAL_MS: "0", // the order poll asks the bank every time in tests (test/iciciCancelRefund.e2e.test.js switches the throttle on for its own test)
     GST_RATE_BP: "1800",
     NODE_ENV: "test",
     // Tests must never reach a real video engine (it may be running on this machine and would spend real credits).

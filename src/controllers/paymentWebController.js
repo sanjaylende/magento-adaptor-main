@@ -12,8 +12,11 @@ async function returnPage(req, res) {
   let title;
   let body;
   try {
-    const { order } = await payments.handleReturn(gateway, params);
-    if (order.status === "paid") {
+    const { order, unconfirmed } = await payments.handleReturn(gateway, params);
+    if (unconfirmed) {
+      title = "Payment received";
+      body = `<h1>Payment received</h1><p>Your bank says the payment went through. We are confirming it with the bank now, which usually takes a minute or two. You can close this tab; your ${order.kind === "plan" ? "plan" : "credit"} is added as soon as it is confirmed. If it is not in Plans &amp; Billing after a few minutes, contact support with your payment reference.</p>`;
+    } else if (order.status === "paid") {
       title = "Payment received";
       body = `<h1 class="ok">Payment received</h1><p>Thank you. Your ${order.kind === "plan" ? "plan is now active" : "credit has been added"}. You can close this tab and go back to Video Generator.</p>`;
     } else if (order.status === "failed" || order.status === "canceled") {
@@ -39,7 +42,8 @@ async function returnPage(req, res) {
 async function callback(req, res) {
   try {
     const fields = req.body && Object.keys(req.body).length ? req.body : req.query;
-    await payments.handleReturn(req.params.gateway, { ...fields });
+    const handled = await payments.handleReturn(req.params.gateway, { ...fields });
+    if (handled.unconfirmed) return res.status(503).json({ error: "Not confirmed yet" }); // the bank may send it again; the scheduled check confirms it meanwhile
     res.json({ ok: true });
   } catch (err) {
     logger.error("Gateway callback rejected:", err.message);

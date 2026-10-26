@@ -1,5 +1,6 @@
 // Staff console: merchants, installations, stores, subscriptions, payments, refunds, plans and the audit log.
 // Server-rendered pages under /admin, behind a signed cookie session. Staff sign in with their LTX account (src/services/adminUserService.js).
+const crypto = require("crypto");
 const express = require("express");
 const config = require("../config");
 const { query, asSystem } = require("../db/connection");
@@ -263,17 +264,19 @@ router.get("/admin/payments/:id", asyncHandler(async (req, res) => {
   const cur = o.currency.trim();
   const refunded = refunds.rows.filter((r) => r.status === "succeeded").reduce((a, r) => a + r.amount_minor, 0);
   const canRefund = req.staff.role === "admin" && ["paid", "partially_refunded"].includes(o.status) && refunded < o.total_minor;
+  const canCancel = req.staff.role === "admin" && ["created", "pending"].includes(o.status);
   render(req, res, { title: `Payment ${o.merchant_txn_no}`, active: "/admin/payments", body: `<h1>Payment ${v.e(o.merchant_txn_no)} ${v.statusTag(o.status)}</h1>
     <div class="kv"><div>Merchant</div><div>${v.e(o.merchant)} · <a href="/admin/stores/${o.store_id}">${v.e(o.store)}</a></div><div>What</div><div>${v.e(payments.describeOrder(payments.mapOrder(o)))}</div>
     <div>Amount</div><div>${major(o.subtotal_minor, cur)} + tax ${major(o.tax_minor, cur)} = <b>${major(o.total_minor, cur)}</b></div><div>Gateway</div><div>${v.e(o.gateway)} ${o.gateway_ref ? `(${v.e(o.gateway_ref)})` : ""}</div>
     <div>Created / paid</div><div>${v.date(o.created_at)} / ${v.date(o.paid_at)}</div>${o.failure_reason ? `<div>Failure</div><div>${v.e(o.failure_reason)}</div>` : ""}</div>
-    ${canRefund ? `<h2>Refund</h2><form class="inline" method="post" action="/admin/payments/${o.id}/refund">${csrfField}
+    ${canRefund ? `<h2>Refund</h2><form class="inline" method="post" action="/admin/payments/${o.id}/refund">${csrfField}<input type="hidden" name="idem" value="${crypto.randomUUID()}">
       <label>Amount (${v.e(cur)})<input name="amount" type="number" step="0.01" max="${((o.total_minor - refunded) / 100).toFixed(2)}" value="${((o.total_minor - refunded) / 100).toFixed(2)}" required></label>
       <label>Reason<input name="reason" size="30" required></label>
       <label>Entitlement<select name="entitlement"><option value="none">Keep plan / credit</option><option value="${o.kind === "plan" ? "cancel_plan" : "remove_credit"}">${o.kind === "plan" ? "End the plan now" : "Take back the credit"}</option></select></label>
       <button>Refund</button></form>` : ""}
+    ${canCancel ? `<h2>Cancel payment</h2><form class="inline" method="post" action="/admin/payments/${o.id}/cancel">${csrfField}<button>Cancel this unpaid payment</button> <span class="muted">ICICI is asked first; a payment the bank reports as paid is recorded as paid, not canceled.</span></form>` : ""}
     <h2>Invoices and credit notes</h2>${v.table(["Number", "Kind", { label: "Total", n: true }, "Issued"], invoices.rows.map((i) => [v.e(i.number), v.e(i.kind), major(i.total_minor, cur), v.date(i.issued_at)]))}
-    <h2>Refunds</h2>${v.table(["When", { label: "Amount", n: true }, "Status", "Reason", "By"], refunds.rows.map((r) => [v.date(r.created_at), major(r.amount_minor, cur), v.statusTag(r.status), v.e(r.reason), v.e(r.requested_by)]))}
+    <h2>Refunds</h2>${v.table(["When", { label: "Amount", n: true }, "Status", "Reason", "By"], refunds.rows.map((r) => [v.date(r.created_at), major(r.amount_minor, cur), v.statusTag(r.status) + (r.failure_reason ? ` <span class="muted">${v.e(r.failure_reason)}</span>` : ""), v.e(r.reason), v.e(r.requested_by)]))}
     <h2>Gateway events</h2>${v.table(["When", "Event", "Payload"], events.rows.map((g) => [v.date(g.created_at), v.e(g.event_key), `<code>${v.e(JSON.stringify(g.payload).slice(0, 160))}</code>`]))}` });
 }));
 
@@ -282,9 +285,18 @@ router.post("/admin/payments/:id/refund", requireAdminRole, validate({ body: S.a
   try {
     await payments.refundOrder({
       orderId: req.params.id, amountMinor: Math.round(Number(req.body.amount) * 100), reason: (req.body.reason || "").trim(),
-      entitlementAction: ["cancel_plan", "remove_credit"].includes(req.body.entitlement) ? req.body.entitlement : "none", actor: actor(req),
-    });
-    back(res, to, "Refund processed");
+      entitlementAction: ["cancel_plan", "remove_credit"].includes(req.body.entitlement) ? req.body.entitlement : "none", idempotencyKey: req.body.idem || null, actor: actor(req),
+    }).then((r) => back(res, to, r.duplicate ? "This refund was already requested; nothing was sent again" : r.status === "succeeded" ? "Refund processed" : "Refund accepted by the bank; it is being processed"));
+  } catch (err) {
+    back(res, to, null, err.userMessage || err.message);
+  }
+}));
+
+router.post("/admin/payments/:id/cancel", requireAdminRole, validate({ body: S.admin.csrfOnly }), asyncHandler(async (req, res) => {
+  const to = `/admin/payments/${req.params.id}`;
+  try {
+    const r = await payments.cancelOrder({ orderId: req.params.id, actor: actor(req) });
+    back(res, to, r.outcome === "canceled" ? "Payment canceled" : "The bank reports this payment as failed; it was recorded as failed");
   } catch (err) {
     back(res, to, null, err.userMessage || err.message);
   }
