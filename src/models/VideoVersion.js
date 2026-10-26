@@ -36,6 +36,19 @@ const ALLOCATABLE = new Set([...PATCHABLE, "candidateImages", "candidatesExpires
 
 const pick = (obj, allowed) => Object.fromEntries(Object.entries(obj).filter(([k]) => allowed.has(k)));
 
+// The engine's failure text as a merchant may see it: one short line, without web addresses, IP addresses, host:port pairs, file paths or
+// a raw JSON body (those stay in the server log). Anything that is mostly a data dump becomes a generic sentence.
+function safeReason(text) {
+  if (!text) return null;
+  let t = String(text).replace(/https?:\/\/\S+/gi, "[link]")
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, "[address]")
+    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*:\d{2,5}\b/gi, "[address]")
+    .replace(/(?:[a-z]:\\|\/)[^\s"']*[\\/][^\s"']*/gi, "[path]")
+    .replace(/\s+/g, " ").trim();
+  if (/[{[]\s*"/.test(t)) return "The video service could not finish this video.";
+  return t.length > 200 ? t.slice(0, 197) + "..." : t;
+}
+
 // EAV entity + its slot -> the plain object the controllers and browser UI use.
 function toDto(entity, slot) {
   if (!entity) return null;
@@ -50,7 +63,7 @@ function toDto(entity, slot) {
     aspectRatio: v.aspectRatio || null,
     videoUrl: v.videoUrl || null,
     thumbnailUrl: v.thumbnailUrl || null,
-    error: v.error || null,
+    error: safeReason(v.error),
     projectId: v.projectId || null,
     variantId: v.variantId || null,
     jobId: v.jobId || null,

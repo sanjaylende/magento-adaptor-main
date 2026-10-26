@@ -82,7 +82,7 @@ Phase 1 of the performance work (2026-10-13). Method: read the code paths of the
 - **Decision:** NOT FIXED: merchant-visible behaviour; confirm with the engine team whether 5:4 is supported for generation
 - **Risk:** n/a
 
-### FND-UI-1  (not fixed, reported)
+### FND-UI-1  (fixed on 26 Oct 2026 by porting the WooCommerce adapter's CSS; T11 now fails if anything sticks out sideways at 390 px)
 
 - **Where:** public/css and public/js/app.js
 - **What:** On a 390 px phone the product list (filter row, table, search echo) is wider than the screen; a 300-character search term makes the page about 1300 px wide.

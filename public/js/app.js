@@ -24,7 +24,25 @@ function apiUrl(path) {
 // (src/downloadToken.js verifies it server-side), then navigate to
 // that. Shared by every "Download" action (panel card, detail page,
 // version history) instead of each building its own href.
-async function downloadVideo(tag, videoType, versionId) {
+async function downloadVideo(tag, videoType, versionId, button) {
+  // The download can start a while after the click on a slow connection (the link is prepared first, then the file is fetched), so the
+  // button says so at once and ignores further clicks until the browser has been handed the file.
+  if (button && button.dataset.busy === "1") return;
+  const textual = !!button && /^\s*download\s*$/i.test(button.textContent); // icon-only buttons keep their icon, they only show as busy
+  const label = textual ? button.textContent : "";
+  if (button) {
+    button.dataset.busy = "1";
+    button.setAttribute("aria-busy", "true");
+    button.classList.add("is-busy");
+    if (textual) button.textContent = "Downloading…";
+  }
+  const finish = () => {
+    if (!button) return;
+    delete button.dataset.busy;
+    button.removeAttribute("aria-busy");
+    button.classList.remove("is-busy");
+    if (textual) button.textContent = label;
+  };
   try {
     const path = "/api/generated/" + encodeURIComponent(tag) + "/" + encodeURIComponent(videoType) + "/download-link" +
       (versionId ? "?versionId=" + encodeURIComponent(versionId) : "");
@@ -32,9 +50,44 @@ async function downloadVideo(tag, videoType, versionId) {
     const body = await res.json();
     if (!res.ok || !body.url) throw new Error(body.error || "Could not prepare download");
     window.location.href = body.url;
+    setTimeout(finish, 4000); // navigating to a file download leaves this page in place and gives no "finished" event
   } catch (err) {
+    finish();
     alert(err.message);
   }
+}
+
+// Copies text to the clipboard. The app runs inside an iframe of the store's admin, and the browser refuses the modern clipboard call there unless
+// the page that embeds it allows it (the plugin's frame does not), so the older copy command on a hidden field is the fallback. Resolves true on success.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the older way */ }
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.setAttribute("aria-hidden", "true");
+  field.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;";
+  document.body.appendChild(field);
+  const active = document.activeElement;
+  try {
+    field.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+    if (active && active.focus) active.focus();
+  }
+}
+
+// What a failed video shows besides "Generation failed": the reason the video service gave, shortened to a line, without addresses.
+function failureDetail(error) {
+  const text = String(error || "").replace(/https?:\/\/\S+/gi, "[link]").replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, "[address]").replace(/\s+/g, " ").trim();
+  return text.length > 160 ? text.slice(0, 157) + "…" : text;
 }
 // Plan/usage snapshot for the usage badge + Plan modal's first paint --
 // same shape GET /api/billing/status returns (buildBillingSnapshot),
@@ -489,7 +542,7 @@ function renderPanel() {
 document.getElementById("appRoot").addEventListener("click", async (e) => {
   const downloadBtn = e.target.closest('[data-action="download-video"]');
   if (downloadBtn) {
-    downloadVideo(downloadBtn.dataset.tag, downloadBtn.dataset.videoType, downloadBtn.dataset.versionId || null);
+    downloadVideo(downloadBtn.dataset.tag, downloadBtn.dataset.videoType, downloadBtn.dataset.versionId || null, downloadBtn);
     return;
   }
 
@@ -571,12 +624,8 @@ document.getElementById("appRoot").addEventListener("click", async (e) => {
 
   const shareBtn = e.target.closest('[data-action="share-preview"]');
   if (shareBtn) {
-    try {
-      await navigator.clipboard.writeText(shareBtn.dataset.videoUrl);
-      alert("Video link copied — note it expires 7 days after generation.");
-    } catch {
-      alert(shareBtn.dataset.videoUrl);
-    }
+    if (await copyText(shareBtn.dataset.videoUrl)) alert("Video link copied. Expires in 7 days.");
+    else alert(shareBtn.dataset.videoUrl); // the browser would not copy: show the link so it can be copied by hand
     return;
   }
 
@@ -727,7 +776,8 @@ function renderDetailTabBody(product, slots) {
   // Previously only "generating"/"error" were checked and everything else was assumed "ready", which for a candidates/canceled
   // slot tried to render <video src="null"> -- there is no video yet for either of those.
   if (status === "rendering") player = '<div class="detail-player"><div class="spinner"></div></div>';
-  else if (status === "failed") player = '<div class="detail-player-empty row-error">Generation failed. Try again, or contact support if this keeps happening.</div>';
+  else if (status === "failed") player = '<div class="detail-player-empty row-error">Generation failed. Try again, or contact support if this keeps happening.' +
+    (gen.error ? '<div class="failure-detail">Reason: ' + escapeHtml(failureDetail(gen.error)) + '</div>' : '') + '</div>';
   else if (status === "candidates") player = '<div class="detail-player-empty muted">Awaiting your pick from an earlier preview. Regenerate video to start a new one.</div>';
   else if (status === "canceled") player = '<div class="detail-player-empty muted">Generation canceled.</div>';
   // controlslist="nofullscreen" + playsinline: without them, pressing Play on a bare <video> triggers the native fullscreen takeover
@@ -757,7 +807,7 @@ function renderDetailTabBody(product, slots) {
     : "";
   const versionSuffix = gen.versionNo ? ' · Version ' + gen.versionNo : '';
   const ratioSuffix = gen.aspectRatio ? ' · <span class="ratio-inline">' + escapeHtml(gen.aspectRatio) + '</span>' : '';
-  const historyBtn = gen.versionNo > 1
+  const historyBtn = (gen.versionCount || gen.versionNo) > 1
     ? '<button type="button" class="btn-text" data-action="open-versions" data-tag="' + escapeHtml(product.uniqueTag) + '" data-video-type="' + slot.type + '">Version history</button>'
     : "";
   const templateLine = gen.overlayFamily
@@ -996,7 +1046,7 @@ document.getElementById("versionsPanelRoot").addEventListener("click", (e) => {
   const restoreBtn = e.target.closest('[data-action="restore-version"]');
   if (restoreBtn) { restoreVersion(restoreBtn.dataset.tag, restoreBtn.dataset.videoType, restoreBtn.dataset.versionId); return; }
   const downloadBtn = e.target.closest('[data-action="download-video"]');
-  if (downloadBtn) downloadVideo(downloadBtn.dataset.tag, downloadBtn.dataset.videoType, downloadBtn.dataset.versionId || null);
+  if (downloadBtn) downloadVideo(downloadBtn.dataset.tag, downloadBtn.dataset.videoType, downloadBtn.dataset.versionId || null, downloadBtn);
 });
 
 // ---------- Video preview popup ----------
@@ -2076,7 +2126,11 @@ async function loadRealProductPhotos() {
     // photos beyond these 4 are still reachable per-tile via Change
     // Image (onChangeImageClick re-fetches the full list and offers
     // back whatever isn't already in the pool).
-    const realTiles = (body.images || []).slice(0, 4).map((img, i) => ({ ...img, id: "real:" + i }));
+    // Photos uploaded for this product earlier (an earlier version's own picture) come back too, after the store's own four, so that a regenerate can
+    // use them again; the rest of the store's photos stay reachable through Change Image.
+    const all = body.images || [];
+    const realTiles = all.filter((img) => !img.uploaded).slice(0, 4).concat(all.filter((img) => img.uploaded).slice(0, 4))
+      .map((img, i) => ({ ...img, id: "real:" + i }));
     modal.pool = modal.pool.filter((p) => p.source !== "real").concat(realTiles);
   } catch (err) {
     if (modal !== owner) return;
@@ -2236,6 +2290,8 @@ async function onStillFileSelected(event) {
     // The adapter hosts the upload itself (a signed link the video engine can fetch); the store's own gallery is not touched.
     tile.url = body.url;
     tile.displayUrl = body.displayUrl || body.url;
+    tile.uploaded = true;
+    tile.name = file.name;
     tile.uploading = false;
   } catch (err) {
     // The placeholder tile never got a real image -- drop it rather
@@ -2325,6 +2381,7 @@ function stillTileHtml(tile) {
       ' onclick="toggleStillSelection(\'' + tile.id + '\')">' +
     '<img src="' + escapeHtml(tile.displayUrl || tile.url) + '" alt="' + (isReal ? "Product photo" : "AI-generated still") + '" />' +
     (selected ? '<span class="still-badge">' + (orderable ? (idx + 1) : "✓") + '</span>' : "") +
+    (tile.uploaded ? '<span class="tile-tag" title="' + escapeHtml(tile.name || "Uploaded photo") + '">Uploaded</span>' : "") +
     overlay +
   '</div>';
 }
@@ -2621,7 +2678,7 @@ function renderModal() {
   function overlayPreviewHtml() {
     if (modal.loadingOverlayPreview) return '<div class="field-hint">Loading preview…</div>';
     if (!modal.overlayPreviewUrl) return "";
-    return '<img src="' + modal.overlayPreviewUrl + '" style="max-width:100%;border-radius:8px;border:1px solid #d3d1c7;margin-top:8px;display:block;" />';
+    return '<img src="' + escapeHtml(modal.overlayPreviewUrl) + '" alt="Preview of the chosen overlay" style="max-width:100%;border-radius:8px;border:1px solid #d3d1c7;margin-top:8px;display:block;" />';
   }
 
   const EFFECT_OPTIONS = [
@@ -2862,6 +2919,29 @@ function renderModal() {
       active.focus();
     }
   }
+  nameFormControls(root);
+}
+
+// The dialog's fields are a <label> followed by a control, without the two being tied together, so a screen reader announced the selects as
+// unnamed. Ties each label to its first control, and names any further control in the same field (the second select of an overlay variable row).
+let formControlSeq = 0;
+function nameFormControls(root) {
+  root.querySelectorAll(".field").forEach((field) => {
+    const label = field.querySelector(":scope > label");
+    if (!label || label.querySelector("input, select, textarea")) return; // radio and checkbox options are labelled by wrapping
+    const controls = Array.from(field.querySelectorAll("select, textarea, input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([type=file])"));
+    if (!controls.length) return;
+    const text = (label.textContent || "").trim();
+    controls.forEach((control, i) => {
+      if (control.getAttribute("aria-label") || control.getAttribute("aria-labelledby")) return;
+      if (i === 0) {
+        if (!control.id) control.id = "fld-" + (++formControlSeq);
+        label.htmlFor = control.id;
+      } else {
+        control.setAttribute("aria-label", i === 1 ? text + " value" : text + " (" + (i + 1) + ")");
+      }
+    });
+  });
 }
 
 // loadAttributeOptions/loadModalOverlayFamilies/loadOverlayPreview never
@@ -2976,10 +3056,25 @@ setInterval(() => { if (view.mode === "list") renderRows(); }, 60000);
       dlg.setAttribute("aria-modal", "true");
       dlg.setAttribute("aria-label", (heading && heading.textContent.trim()) || o.name);
       dlg.tabIndex = -1;
+      // A close X in the top-right corner of the window, pinned while the window scrolls (a tall step, like the overlay list, pushes the
+      // footer's Close button out of sight). Same action as Escape and the dialog's own Cancel/Close.
+      const box = dlg.querySelector(".modal");
+      if (box && !box.querySelector(":scope > .modal-close-bar")) {
+        const bar = document.createElement("div");
+        bar.className = "modal-close-bar";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "modal-close";
+        button.setAttribute("aria-label", "Close");
+        button.textContent = "×";
+        button.addEventListener("click", () => o.close());
+        bar.appendChild(button);
+        box.insertBefore(bar, box.firstChild);
+      }
       const active = document.activeElement;
       if (!wasOpen[o.id]) {
         openers[o.id] = active && active !== document.body ? { el: active, sel: selectorFor(active), text: (active.textContent || "").trim() } : lastControl;
-        const first = Array.from(dlg.querySelectorAll(FOCUSABLE)).find((el) => el.offsetParent !== null);
+        const first = Array.from(dlg.querySelectorAll(FOCUSABLE)).find((el) => el.offsetParent !== null && !el.classList.contains("modal-close"));
         (first || dlg).focus();
       } else if (!active || active === document.body) {
         dlg.focus(); // a re-render replaced the element that had focus

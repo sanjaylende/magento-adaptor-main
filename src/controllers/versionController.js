@@ -73,10 +73,12 @@ async function deleteVersion(req, res) {
     if (!deleted) return res.status(404).json({ error: "Version not found" });
     // Keep the in-memory mirror in step when the deleted version was the slot's current one.
     const key = genKey(uniqueTag, videoType);
+    const remaining = (await videoVersions.listVersions(uniqueTag, videoType)).filter((v) => !PREVIEW_STATUSES.includes(v.status));
     if (generatedState.get(key)?.currentVersionId === deleted.id) {
-      const remaining = await videoVersions.listVersions(uniqueTag, videoType);
-      if (remaining.length) generatedState.set(key, { ...remaining[0], currentVersionId: remaining[0].id });
+      if (remaining.length) generatedState.set(key, { ...remaining[0], versionCount: remaining.length, currentVersionId: remaining[0].id });
       else generatedState.remove(key);
+    } else if (generatedState.get(key)) {
+      generatedState.set(key, { ...generatedState.get(key), versionCount: remaining.length }); // the Version history link follows the real count
     }
     if (deleted.projectId || deleted.variantId) {
       deleteVideo({ projectId: deleted.projectId, variantId: deleted.variantId }, config.flipick).catch((err) =>

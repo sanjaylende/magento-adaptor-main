@@ -187,9 +187,53 @@ describe("platform", () => {
       const seen = await db.withStore(otherStore.id, async () => (await db.query("SELECT id FROM uploaded_images")).rows.length);
       assert.equal(seen, 0, "row-level security hides it from another store");
     });
+
+    it("a photo uploaded for a product is offered again for that product only, newest first, for 8 days", async () => {
+      const boot = await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const other = boot.body.products.find((p) => p.uniqueTag !== "magento-1-novariant");
+      const first = await (await upload(sessionA1, PNG, { filename: "first.png" })).json();
+      const second = await (await upload(sessionA1, PNG, { filename: "second.png" })).json();
+      const listed = (await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 })).body.images;
+      const ups = listed.filter((i) => i.uploaded);
+      assert.ok(ups.length >= 2);
+      assert.deepEqual(ups.slice(0, 2).map((i) => i.name), ["second.png", "first.png"], "newest first");
+      assert.match(ups[0].displayUrl, /^\/up\//);
+      assert.match(ups[0].url, /\/up\/[A-Za-z0-9_.-]+$/);
+      assert.equal((await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}${ups[1].displayUrl}`)).status, 200, "the listed link serves the image");
+      assert.ok(listed.findIndex((i) => i.uploaded) >= listed.filter((i) => !i.uploaded).length, "the store's own photos come first");
+      assert.ok(first.url && second.url);
+      if (other) {
+        const o = (await h.api("GET", `/api/product-images/${other.uniqueTag}`, { token: sessionA1 })).body.images;
+        assert.equal(o.filter((i) => i.uploaded).length, 0, "another product does not get them");
+      }
+      // another store whose product has the same tag must not see them (the query is scoped to the store, not only protected by row-level security)
+      const o2 = await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionB1 });
+      assert.ok(o2.status === 200 || o2.status === 404);
+      if (o2.status === 200) assert.equal(o2.body.images.filter((i) => i.uploaded).length, 0, "another store gets none of them");
+      // older than the 8 days the scheduler keeps: no longer offered
+      await db.asSystem(() => db.query("UPDATE uploaded_images SET created_at = now() - interval '9 days' WHERE filename = 'first.png'"));
+      const after = (await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 })).body.images.filter((i) => i.uploaded).map((i) => i.name);
+      assert.ok(!after.includes("first.png") && after.includes("second.png"));
+    });
+
   });
 
   describe("a product's uniqueTag changes (the variant that supplies its price changes)", () => {
+    it("the current version says how many versions the slot has, also after an older one is restored", async () => {
+      const videoVersions = require("../src/repositories/VideoVersionRepository");
+      await ctx.runWithTenant(await ctxFor(A, 1), async () => {
+        const v1 = await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "ready", aspectRatio: "16:9" });
+        await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "ready", aspectRatio: "16:9" });
+        const restored = await videoVersions.setCurrentVersion("magento-902-1", "hero_product", v1.id);
+        assert.equal(restored.versionNo, 1);
+        assert.equal(restored.versionCount, 2, "Version 1 is current but the history link still has something to show");
+        // a preview that was never rendered is not in the history window, so it is not counted either
+        await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "candidates", aspectRatio: "16:9" });
+        const again = await videoVersions.setCurrentVersion("magento-902-1", "hero_product", v1.id);
+        assert.equal(again.versionCount, 2, "previews are not counted");
+      });
+    });
+
     it("its videos move to the new tag, keep their history, and a type that already exists under the new tag is left alone", async () => {
       const videoVersions = require("../src/repositories/VideoVersionRepository");
       const generatedState = require("../src/services/generatedState");

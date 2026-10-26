@@ -48,7 +48,7 @@ module.exports = async function ui({ stack, run, connectStore, waitStatus, repor
         const newFailed = failed.slice(failedBefore).filter((f) => !expectStatus.some((s) => f.startsWith(String(s))) && !/favicon/.test(f));
         const newConsole = consoleProblems.slice(problemsBefore).filter((m) => !expectStatus.some((s) => m.includes(String(s))));
         run.check(`${tagName} ${name}: screen reached`, reached, why);
-        if (vp === 'phone') run.known(`${tagName} ${name}: nothing sticks out sideways`, overflow <= 1, `${overflow}px wider than the screen`, 'FND-UI-1: the product list is wider than a 390 px phone screen (present before the performance work)');
+        if (vp === 'phone') run.check(`${tagName} ${name}: nothing sticks out sideways`, overflow <= 1, `${overflow}px wider than the screen`);
         run.check(`${tagName} ${name}: no console errors, no failed requests`, newFailed.length === 0 && newConsole.length === 0, [...newFailed, ...newConsole].slice(0, 2).join(' | '));
       };
       const appUrl = () => `${BASE}/?embed=1&launch=${encodeURIComponent(c.launch())}`; // a launch link works once

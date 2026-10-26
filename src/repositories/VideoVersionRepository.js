@@ -35,8 +35,18 @@ async function getOrCreateSlot(uniqueTag, videoType) {
 const slotVersions = (slot) => eav.findAll(VERSION, { parentId: slot.id });
 const byNewest = (a, b) => b.values.versionNo - a.values.versionNo;
 
+// Versions the history window lists: real attempts only, not previews that were never rendered.
+const isHistoryVersion = (v) => !PREVIEW_STATUSES.includes(v.values.status);
+
+// The version as the browser sees it, plus how many versions its slot's history has: the page shows "Version history" whenever there is more than
+// one, also when the current one is Version 1 (an older version that was restored).
+async function dtoWithCount(entity, slot) {
+  return { ...VideoVersion.toDto(entity, slot), versionCount: (await slotVersions(slot)).filter(isHistoryVersion).length };
+}
+
 async function toDto(entity) {
-  return entity ? VideoVersion.toDto(entity, await eav.load(SLOT, entity.parentId)) : null;
+  if (!entity) return null;
+  return dtoWithCount(entity, await eav.load(SLOT, entity.parentId));
 }
 
 // Resolves a version id to { version, slot }, or null.
@@ -99,7 +109,7 @@ async function setCurrentVersion(uniqueTag, videoType, versionId) {
     const version = slot && (await eav.load(VERSION, versionId));
     if (!version || version.parentId !== slot.id) return null;
     await eav.update(SLOT, slot.id, { currentVersionId: version.id });
-    return VideoVersion.toDto(version, slot);
+    return dtoWithCount(version, slot);
   });
 }
 
@@ -146,8 +156,8 @@ async function cancelVersion(uniqueTag, videoType, versionId) {
     const current = previous || version;
     await eav.update(SLOT, slot.id, { currentVersionId: current.id });
     return {
-      canceled: VideoVersion.toDto(await eav.load(VERSION, version.id), slot),
-      current: VideoVersion.toDto(await eav.load(VERSION, current.id), slot),
+      canceled: await dtoWithCount(await eav.load(VERSION, version.id), slot),
+      current: await dtoWithCount(await eav.load(VERSION, current.id), slot),
     };
   });
 }
@@ -188,9 +198,11 @@ async function sweepAfterRestart() {
 // currentVersionId), keyed "uniqueTag::videoType".
 async function loadGenerated() {
   const generated = {};
+  const counts = new Map(); // versions per slot, counted once for the whole store
+  for (const v of await eav.findAll(VERSION, { storeId: storeId() })) if (isHistoryVersion(v)) counts.set(v.parentId, (counts.get(v.parentId) || 0) + 1);
   for (const slot of await eav.findAll(SLOT, { storeId: storeId() })) {
     const current = slot.values.currentVersionId && (await eav.load(VERSION, slot.values.currentVersionId));
-    if (current) generated[slotKey(slot.values.uniqueTag, slot.values.videoType)] = { ...VideoVersion.toDto(current, slot), currentVersionId: current.id };
+    if (current) generated[slotKey(slot.values.uniqueTag, slot.values.videoType)] = { ...VideoVersion.toDto(current, slot), versionCount: counts.get(slot.id) || 1, currentVersionId: current.id };
   }
   return generated;
 }
