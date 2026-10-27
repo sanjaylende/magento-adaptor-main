@@ -177,6 +177,20 @@ describe("platform", () => {
       assert.equal((await call({ websiteIds: [1], surprise: true })).status, 400);
       assert.equal((await call({ websiteIds: ["1; DROP TABLE stores"] })).status, 400);
       assert.equal((await call({ websiteIds: Array.from({ length: 101 }, (_, i) => i) })).status, 400);
+      assert.equal((await call({ websiteIds: [] })).status, 400, "an empty list is refused: leave websiteIds out to mean every website");
+    });
+
+    it("keeps the cached products and only marks them stale, so a changed price still carries a product's videos to its new tag", async () => {
+      await load(sessionA1);
+      const productService = require("../src/services/productService");
+      const count = await ctx.runWithTenant(await ctxFor(A, 1), async () => productService.list().length);
+      assert.ok(count > 0);
+      assert.equal((await call({ websiteIds: [1] })).status, 200);
+      const after = await ctx.runWithTenant(await ctxFor(A, 1), async () => ({ n: productService.list().length, at: productService.syncedAt() }));
+      assert.equal(after.n, count, "the products are still there to compare with the fresh list");
+      assert.equal(after.at, null, "but they are stale");
+      await load(sessionA1);
+      assert.ok(await synced(A, 1), "the next read fetches the catalog again");
     });
   });
 

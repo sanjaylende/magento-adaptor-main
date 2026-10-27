@@ -64,7 +64,7 @@ router.get("/internal/magento-token/:shop", perIp("internal-token", 60), require
 // ---- Extension, server to server (signed): no store needed ----
 const signedOnly = [tenantAuth({ requireStore: false }), perInstallation(300)];
 router.post("/api/v1/ping", ...signedOnly, validate({ body: S.body.ping }), h(installation.ping));
-router.post("/api/v1/catalog-changed", ...signedOnly, validate({ body: S.body.catalogChanged }), h(installation.catalogChanged));
+router.post("/api/v1/catalog-changed", ...signedOnly, limitBody(4 * 1024), validate({ body: S.body.catalogChanged }), h(installation.catalogChanged));
 router.post("/api/v1/stores/sync", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.syncStores));
 router.post("/api/v1/rotate-secret", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.rotateSecret));
 router.post("/api/v1/uninstall", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.uninstall));
