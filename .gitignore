@@ -153,3 +153,10 @@ backups/
 
 # Regression suite output
 tests/regression/reports/
+
+# Dependencies, build and test output, dumps
+vendor/
+build/
+playwright-report/
+test-results/
+*.dump

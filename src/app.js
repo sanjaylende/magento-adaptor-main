@@ -7,7 +7,7 @@ const logger = require("./utils/logger");
 const routes = require("./routes");
 const errorHandler = require("./middleware/errorHandler");
 const requestLog = require("./middleware/requestLog");
-const { runMigrations, syncEntityTypes } = require("./db/migrate");
+const { runMigrations, assertMigrated, syncEntityTypes } = require("./db/migrate");
 const VideoSlot = require("./models/VideoSlot");
 const VideoVersion = require("./models/VideoVersion");
 const StoreSetting = require("./models/StoreSetting");
@@ -56,7 +56,9 @@ async function start() {
   });
 
   assertSafeConfig(); // production only: refuses the ICICI test (UAT) address, plain-HTTP address, development passwords
-  await runMigrations();
+  // RUN_MIGRATIONS_ON_START (default true): apply pending migrations now; false: a deploy step ran "npm run db:migrate", only check it.
+  if (config.database.runMigrationsOnStart) await runMigrations();
+  else await assertMigrated();
   await syncEntityTypes([VideoSlot, VideoVersion, StoreSetting]);
   await videoVersions.sweepAfterRestart();
   scheduler.start();

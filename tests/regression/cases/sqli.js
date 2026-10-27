@@ -12,7 +12,7 @@ module.exports = async function sqli({ stack, run, connectStore }) {
   const c = await connectStore(stack, { name: 'Injection Store' });
   const tag = (await c.get('/api/products')).body.products[0].uniqueTag;
   const tables = ['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders', 'usage_events', 'rate_limits', 'video_versions'];
-  const exists = async () => (await stack.db("select table_name from information_schema.tables where table_schema = 'public' and table_name = any($1)", [tables])).map((r) => r.table_name).sort();
+  const exists = async () => (await stack.db("select table_name from information_schema.tables where table_schema = current_schema() and table_name = any($1)", [tables])).map((r) => r.table_name).sort();
   const countsOf = async (names) => { const o = {}; for (const t of names) o[t] = Number((await stack.db(`select count(*)::int as n from ${t}`))[0].n); return o; };
   const present = await exists();
   const before = await countsOf(['merchants', 'installations', 'stores', 'store_subscriptions', 'payment_orders'].filter((t) => present.includes(t)));

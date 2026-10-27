@@ -1,5 +1,6 @@
 // The Image Transitions / Hero Product stills picker's photo sources:
-//   GET  /api/product-images/:uniqueTag   the product's own real photos (loaded only when the merchant reaches that step)
+//   GET  /api/product-images/:uniqueTag   the product's own real photos, then the photos uploaded for it in the last 8 days (loaded only when the
+//                                         merchant reaches that step); uploaded ones carry uploaded: true and a name
 //   POST /api/upload-still-image          a photo uploaded from the merchant's computer, hosted by the adapter itself
 //   GET  /up/:token                       public, signed, short-lived link the video engine (and the browser) fetch an upload from
 //
@@ -16,6 +17,8 @@ const { proxiedImageUrl } = require("./imageController");
 
 const LINK_TTL_SECONDS = 7 * 24 * 3600;
 const DAILY_LIMIT = 100;
+const KEEP_UPLOADS_DAYS = 8; // the scheduler deletes uploads older than this (see services/scheduler.js)
+const MAX_LISTED_UPLOADS = 12;
 
 // File type from the first bytes: JPEG, PNG, GIF, WebP.
 function sniffImageType(buf) {
@@ -35,7 +38,22 @@ async function productImages(req, res) {
   const product = productService.findProduct(req.params.uniqueTag);
   if (!product) return res.status(404).json({ error: "Product not found — try Refresh", images: [] });
   const urls = [...new Set((product.images && product.images.length ? product.images : (product.image ? [product.image] : [])).filter(Boolean))];
-  res.json({ images: urls.map((url) => ({ url, displayUrl: proxiedImageUrl(url), source: "real" })) });
+  const images = urls.map((url) => ({ url, displayUrl: proxiedImageUrl(url), source: "real" }));
+  // Photos the merchant uploaded for THIS product earlier (an earlier version's own picture, for example) are offered again: they are not in the
+  // store's gallery, so without this a regenerate could never use them. Newest first; each gets a fresh signed link.
+  try {
+    const { rows } = await query(
+      `SELECT id, filename FROM uploaded_images WHERE store_id = $1 AND unique_tag = $2 AND created_at > now() - make_interval(days => $3) ORDER BY created_at DESC LIMIT $4`,
+      [tenant().store.id, product.uniqueTag, KEEP_UPLOADS_DAYS, MAX_LISTED_UPLOADS]
+    );
+    for (const row of rows) {
+      const link = `/up/${signToken({ typ: "up", id: row.id }, LINK_TTL_SECONDS)}`;
+      images.push({ url: `${config.publicBaseUrl}${link}`, displayUrl: link, source: "real", uploaded: true, name: row.filename });
+    }
+  } catch (err) {
+    logger.error("Could not list the photos uploaded for a product", { requestId: req.id, error: err }); // the store's own photos are still returned
+  }
+  res.json({ images });
 }
 
 async function uploadStill(req, res) {
@@ -50,8 +68,8 @@ async function uploadStill(req, res) {
     const { rows: [recent] } = await query("SELECT count(*)::int AS n FROM uploaded_images WHERE created_at > now() - interval '1 day'");
     if (recent.n >= DAILY_LIMIT) return res.status(429).json({ error: `Upload limit reached (${DAILY_LIMIT} images a day). Try again tomorrow.` });
     const { rows: [row] } = await query(
-      "INSERT INTO uploaded_images (store_id, filename, content_type, data) VALUES ($1, $2, $3, $4) RETURNING id",
-      [storeId, cleanName(req.query.filename), type, data]
+      "INSERT INTO uploaded_images (store_id, filename, content_type, data, unique_tag) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [storeId, cleanName(req.query.filename), type, data, product.uniqueTag]
     );
     const path = `/up/${signToken({ typ: "up", id: row.id }, LINK_TTL_SECONDS)}`;
     logger.info("Still image uploaded", { storeId, bytes: data.length, type });

@@ -28,7 +28,7 @@ function videoSummary(uniqueTag) {
 
 // JSON product list: catalog fields + video summary per product.
 async function list(req, res) {
-  if (productService.list().length === 0 || req.query.refresh === "1") {
+  if (productService.list().length === 0 || productService.syncedAt() === null || req.query.refresh === "1") {
     try {
       await productService.refreshProducts();
     } catch (err) {

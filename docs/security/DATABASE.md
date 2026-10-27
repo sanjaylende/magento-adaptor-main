@@ -1,7 +1,10 @@
 # Database security (PostgreSQL 17)
 
 ## What the application already does
-- Two roles: `adapter_owner` (runs migrations at start-up) and `adapter_app` (everything else). `adapter_app` is **not** a
+- Shared-database layout: the data is the schema `magento_adapter` of `ltx_1jnl`; the roles below are `magento_adapter_owner` and
+  `magento_adapter_app` (created by `npm run db:bootstrap`; the legacy single-purpose database used `adapter_owner` / `adapter_app`).
+  Both have `search_path = magento_adapter`, `USAGE` on that schema only, and nothing on `public`, `shopify_adapter` or other schemas.
+- Two roles: the owner (runs migrations at start-up) and the service role (everything else). The service role is **not** a
   superuser and has **no** BYPASSRLS, CREATEDB or CREATEROLE. It cannot create or drop tables. Test: `test/security.e2e.test.js`,
   "M5 database roles".
 - Row-level security on every tenant table: a request only ever sees the rows of its own store. Without a tenant context the
@@ -44,8 +47,8 @@ log_min_duration_statement = 1000         # statements slower than 1 s
 ```
 # TYPE    DATABASE         USER            ADDRESS            METHOD
 local     all              postgres                           peer
-hostssl   magento_adapter  adapter_app     10.0.0.10/32       scram-sha-256   # the application host only
-hostssl   magento_adapter  adapter_owner   10.0.0.10/32       scram-sha-256   # migrations run from the same host
+hostssl   ltx_1jnl           magento_adapter_app    10.0.0.10/32  scram-sha-256   # the application host only
+hostssl   ltx_1jnl           magento_adapter_owner  10.0.0.10/32  scram-sha-256   # migrations run from the same host
 hostssl   all              backup_user     10.0.0.20/32       scram-sha-256   # the backup host, read-only role
 host      all              all             0.0.0.0/0          reject          # everything else, including non-TLS
 host      all              all             ::/0               reject

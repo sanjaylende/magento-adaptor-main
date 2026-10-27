@@ -136,6 +136,64 @@ describe("platform", () => {
     });
   });
 
+  describe("health check", () => {
+    it("answers 200 ok to anyone, without a session", async () => {
+      const res = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/health`);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), "ok");
+      assert.match(res.headers.get("content-type"), /^text\/plain/);
+    });
+  });
+
+  describe("catalog change signal (extension to adapter)", () => {
+    const call = (body, creds = A) => h.signedClient({ installKey: creds.installKey, secret: creds.secret })("POST", "/api/v1/catalog-changed", body);
+    const synced = async (installation, websiteId) => ctx.runWithTenant(await ctxFor(installation, websiteId), async () => require("../src/services/productService").syncedAt());
+    const load = async (token) => h.api("GET", "/api/bootstrap", { token });
+
+    it("drops the cached catalog of the named websites only", async () => {
+      await load(sessionA1); await load(sessionA2);
+      assert.ok(await synced(A, 1) && await synced(A, 2), "both websites have a cached catalog");
+      const r = await call({ websiteIds: [1], reason: "product saved" });
+      assert.equal(r.status, 200);
+      assert.deepEqual({ ok: r.body.ok, invalidated: r.body.invalidated }, { ok: true, invalidated: 1 });
+      assert.equal(await synced(A, 1), null, "website 1 will be refetched");
+      assert.ok(await synced(A, 2), "website 2 is untouched");
+    });
+
+    it("with no website named, every website of the installation is dropped, and never another installation's", async () => {
+      await load(sessionA1); await load(sessionA2); await load(sessionB1);
+      const r = await call({});
+      assert.equal(r.status, 200);
+      assert.equal(r.body.invalidated, 2);
+      assert.equal(await synced(A, 1), null);
+      assert.equal(await synced(A, 2), null);
+      assert.ok(await synced(B, 1), "the other installation keeps its cache");
+    });
+
+    it("needs a valid signature and a known body: unsigned, wrong secret, unknown field and a bad website id are refused", async () => {
+      const url = `http://127.0.0.1:${h.ADAPTER_PORT}/api/v1/catalog-changed`;
+      assert.equal((await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
+      assert.equal((await call({}, { installKey: A.installKey, secret: "not-the-secret" })).status, 401);
+      assert.equal((await call({ websiteIds: [1], surprise: true })).status, 400);
+      assert.equal((await call({ websiteIds: ["1; DROP TABLE stores"] })).status, 400);
+      assert.equal((await call({ websiteIds: Array.from({ length: 101 }, (_, i) => i) })).status, 400);
+      assert.equal((await call({ websiteIds: [] })).status, 400, "an empty list is refused: leave websiteIds out to mean every website");
+    });
+
+    it("keeps the cached products and only marks them stale, so a changed price still carries a product's videos to its new tag", async () => {
+      await load(sessionA1);
+      const productService = require("../src/services/productService");
+      const count = await ctx.runWithTenant(await ctxFor(A, 1), async () => productService.list().length);
+      assert.ok(count > 0);
+      assert.equal((await call({ websiteIds: [1] })).status, 200);
+      const after = await ctx.runWithTenant(await ctxFor(A, 1), async () => ({ n: productService.list().length, at: productService.syncedAt() }));
+      assert.equal(after.n, count, "the products are still there to compare with the fresh list");
+      assert.equal(after.at, null, "but they are stale");
+      await load(sessionA1);
+      assert.ok(await synced(A, 1), "the next read fetches the catalog again");
+    });
+  });
+
   describe("stills picker: product photos and uploads", () => {
     const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 7)]);
     const upload = (token, body, { uniqueTag = "magento-1-novariant", type = "image/png", filename = "photo.png" } = {}) => fetch(
@@ -187,9 +245,71 @@ describe("platform", () => {
       const seen = await db.withStore(otherStore.id, async () => (await db.query("SELECT id FROM uploaded_images")).rows.length);
       assert.equal(seen, 0, "row-level security hides it from another store");
     });
+
+    it("a product with seven store photos lists all seven in the store's order, each with a signed link; a product with one lists one", async () => {
+      await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const r = await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 });
+      assert.equal(r.status, 200);
+      const store = r.body.images.filter((i) => !i.uploaded);
+      assert.equal(store.length, 7);
+      assert.deepEqual(store.map((i) => i.url.split("/").pop()), Array.from({ length: 7 }, (_, i) => `apples-${i + 1}.jpg`));
+      assert.ok(store.every((i) => /^\/img\/[A-Za-z0-9_.-]+$/.test(i.displayUrl) && /^https?:\/\//.test(i.url) && i.source === "real"));
+      assert.equal(new Set(store.map((i) => i.displayUrl)).size, 7, "every picture has its own link");
+      const boot = await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const apples = boot.body.products.find((p) => p.uniqueTag === "magento-1-novariant");
+      assert.equal(apples.images.length, 7);
+      assert.equal(apples.image, apples.images[0], "the first photo is the product picture");
+      const boot2 = await h.api("GET", "/api/bootstrap", { token: sessionA2 });
+      const pears = boot2.body.products.find((p) => p.name === "Pears");
+      assert.equal(pears.images.length, 1);
+    });
+
+    it("a photo uploaded for a product is offered again for that product only, newest first, for 8 days", async () => {
+      const boot = await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const other = boot.body.products.find((p) => p.uniqueTag !== "magento-1-novariant");
+      const first = await (await upload(sessionA1, PNG, { filename: "first.png" })).json();
+      const second = await (await upload(sessionA1, PNG, { filename: "second.png" })).json();
+      const listed = (await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 })).body.images;
+      const ups = listed.filter((i) => i.uploaded);
+      assert.ok(ups.length >= 2);
+      assert.deepEqual(ups.slice(0, 2).map((i) => i.name), ["second.png", "first.png"], "newest first");
+      assert.match(ups[0].displayUrl, /^\/up\//);
+      assert.match(ups[0].url, /\/up\/[A-Za-z0-9_.-]+$/);
+      assert.equal((await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}${ups[1].displayUrl}`)).status, 200, "the listed link serves the image");
+      assert.ok(listed.findIndex((i) => i.uploaded) >= listed.filter((i) => !i.uploaded).length, "the store's own photos come first");
+      assert.ok(first.url && second.url);
+      if (other) {
+        const o = (await h.api("GET", `/api/product-images/${other.uniqueTag}`, { token: sessionA1 })).body.images;
+        assert.equal(o.filter((i) => i.uploaded).length, 0, "another product does not get them");
+      }
+      // another store whose product has the same tag must not see them (the query is scoped to the store, not only protected by row-level security)
+      const o2 = await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionB1 });
+      assert.ok(o2.status === 200 || o2.status === 404);
+      if (o2.status === 200) assert.equal(o2.body.images.filter((i) => i.uploaded).length, 0, "another store gets none of them");
+      // older than the 8 days the scheduler keeps: no longer offered
+      await db.asSystem(() => db.query("UPDATE uploaded_images SET created_at = now() - interval '9 days' WHERE filename = 'first.png'"));
+      const after = (await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 })).body.images.filter((i) => i.uploaded).map((i) => i.name);
+      assert.ok(!after.includes("first.png") && after.includes("second.png"));
+    });
+
   });
 
   describe("a product's uniqueTag changes (the variant that supplies its price changes)", () => {
+    it("the current version says how many versions the slot has, also after an older one is restored", async () => {
+      const videoVersions = require("../src/repositories/VideoVersionRepository");
+      await ctx.runWithTenant(await ctxFor(A, 1), async () => {
+        const v1 = await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "ready", aspectRatio: "16:9" });
+        await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "ready", aspectRatio: "16:9" });
+        const restored = await videoVersions.setCurrentVersion("magento-902-1", "hero_product", v1.id);
+        assert.equal(restored.versionNo, 1);
+        assert.equal(restored.versionCount, 2, "Version 1 is current but the history link still has something to show");
+        // a preview that was never rendered is not in the history window, so it is not counted either
+        await videoVersions.allocateVersion("magento-902-1", "hero_product", { status: "candidates", aspectRatio: "16:9" });
+        const again = await videoVersions.setCurrentVersion("magento-902-1", "hero_product", v1.id);
+        assert.equal(again.versionCount, 2, "previews are not counted");
+      });
+    });
+
     it("its videos move to the new tag, keep their history, and a type that already exists under the new tag is left alone", async () => {
       const videoVersions = require("../src/repositories/VideoVersionRepository");
       const generatedState = require("../src/services/generatedState");

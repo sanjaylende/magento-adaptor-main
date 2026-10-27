@@ -177,6 +177,37 @@ async function pollOrder(orderId) {
   }
 }
 
+// The merchant opened the bank page but does not want to pay after all. The server asks the bank first: a payment that already went
+// through is kept (and its plan activated), never canceled behind the merchant's back.
+async function cancelPendingPayment() {
+  if (!planModal || !planModal.orderId || planModal.busy) return;
+  if (!window.confirm("Cancel this payment? If you have already paid on the bank page, it will not be canceled.")) return;
+  planModal.busy = true;
+  planModal.error = null;
+  renderPlanModal();
+  try {
+    const res = await fetch(apiUrl("/api/billing/orders/" + encodeURIComponent(planModal.orderId) + "/cancel"), { method: "POST", headers: { "Content-Type": "application/json" } });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok || body.code === "already_paid" || body.code === "already_canceled") {
+      planModal.orderId = null;
+      planModal.payLink = null;
+      planModal.notice = res.ok && body.outcome === "canceled" ? "Payment canceled. You have not been charged."
+        : body.code === "already_paid" ? "Your payment had already gone through, so it was not canceled."
+        : body.code === "already_canceled" ? "This payment was already canceled." : null;
+      if (res.ok && body.outcome !== "canceled") planModal.error = "The payment did not go through. You have not been charged.";
+      planModal.busy = false;
+      await refreshBilling();
+      renderPlanModal();
+      return;
+    }
+    throw new Error(body.error || "Could not cancel the payment");
+  } catch (err) {
+    planModal.busy = false;
+    planModal.error = err.message;
+    renderPlanModal();
+  }
+}
+
 async function cancelPlan() {
   if (!planModal) return;
   const label = billing.plans[billing.currentPlan] ? billing.plans[billing.currentPlan].label : "current";
@@ -330,7 +361,7 @@ function renderPlanModal() {
       (gateMessage ? '<div class="plan-gate-banner">' + escapeHtml(gateMessage) + '</div>' : '') +
       (planModal.error ? '<div class="plan-error">' + escapeHtml(planModal.error) + '</div>' : '') +
       (planModal.notice ? '<div class="plan-notice">' + escapeHtml(planModal.notice) +
-        (planModal.payLink && planModal.orderId ? ' <a href="' + escapeHtml(planModal.payLink) + '" target="_blank" rel="noopener">Open payment page</a>' : '') + '</div>' : '') +
+        (planModal.payLink && planModal.orderId ? ' <a href="' + escapeHtml(planModal.payLink) + '" target="_blank" rel="noopener">Open payment page</a> <button type="button" class="btn-text" ' + (planModal.busy ? 'disabled ' : '') + 'onclick="cancelPendingPayment()">Cancel this payment</button>' : '') + '</div>' : '') +
       '<div class="modal-body">' + body + '</div>' +
       '<div class="modal-actions plan-footer"><div class="plan-footer-left">' + leftActions + '</div><button class="btn-text" onclick="closePlanModal()">Close</button></div>' +
     '</div></div>';

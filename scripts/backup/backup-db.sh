@@ -4,6 +4,7 @@
 #   BACKUP_KEY_FILE       file holding the encryption passphrase   (REQUIRED; keep it OFF this server too: store a copy in your password manager)
 #   BACKUP_RETENTION_DAYS delete backups older than this           (default 14)
 #   BACKUP_UPLOAD_CMD     optional command run with the new file as $1 (e.g. "aws s3 cp" to a bucket in ANOTHER account)
+# Only the adapter's schema (DB_SCHEMA, default magento_adapter) is dumped, never the other applications' data in the shared database.
 # Output: <dbname>-YYYYmmdd-HHMMSS.dump.enc (AES-256, PBKDF2) and a .sha256 next to it.
 # Run daily from cron:  15 2 * * *  /opt/flipick-adapter/app/scripts/backup/backup-db.sh >> /var/log/flipick-adapter/backup.log 2>&1
 set -o pipefail
@@ -18,7 +19,7 @@ OUT="$BACKUP_DIR/$PGDATABASE-$STAMP.dump.enc"
 START="$(date +%s)"
 # custom format (compressed, restorable table by table); the dump goes straight into openssl, no plain file touches the disk
 trap 'rm -f "$OUT.partial"' EXIT   # a failed run leaves nothing half-written behind
-pg_dump --format=custom --compress=6 --no-owner --no-privileges | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:$BACKUP_KEY_FILE" > "$OUT.partial"
+pg_dump --format=custom --compress=6 --no-owner --no-privileges $PG_SCHEMA_ARGS | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:$BACKUP_KEY_FILE" > "$OUT.partial"
 mv "$OUT.partial" "$OUT"
 ( cd "$BACKUP_DIR" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
 echo "$(date -u +%FT%TZ) backup ok: $OUT ($(wc -c < "$OUT") bytes, $(( $(date +%s) - START )) s)"

@@ -33,6 +33,11 @@ const body = {
   }),
   session: z.strictObject({ launch: text(4096, 1) }),
   ping: z.strictObject({ magentoVersion: blankToUndefined(text(40)), extensionVersion: blankToUndefined(text(40)) }),
+  // The extension tells the adapter that catalog data changed (product saved or deleted, price or stock changed); no websites named = all of them.
+  catalogChanged: z.strictObject({
+    websiteIds: z.array(z.union([z.int().min(0).max(1000000), z.string().regex(/^[0-9]{1,9}$/)])).min(1).max(100).optional(),
+    reason: blankToUndefined(text(60)),
+  }),
   // Calls that carry no data: the extension may send {} or [] or nothing at all.
   emptyish: z.union([z.strictObject({}), z.array(z.never()).max(0)]).transform(() => ({})),
   tagAndType: z.strictObject({ uniqueTag: tag, videoType }),
@@ -89,7 +94,7 @@ const admin = {
   credit: z.strictObject({ _csrf: text(200), usd: money, note: blankToUndefined(text(300)) }),
   activatePlan: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), interval: z.enum(["monthly", "annual"]), currency: z.enum(["USD", "INR"]), note: blankToUndefined(text(300)) }),
   csrfOnly: z.strictObject({ _csrf: text(200) }),
-  refund: z.strictObject({ _csrf: text(200), amount: money, reason: blankToUndefined(text(500)), entitlement: blankToUndefined(z.enum(["none", "cancel_plan", "remove_credit"])) }),
+  refund: z.strictObject({ _csrf: text(200), amount: money, reason: blankToUndefined(text(500)), entitlement: blankToUndefined(z.enum(["none", "cancel_plan", "remove_credit"])), idem: blankToUndefined(text(80)) }),
   planPrice: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), interval: z.enum(["monthly", "annual"]), currency: z.enum(["USD", "INR"]), amount: money, budget: money }),
   planRate: z.strictObject({ _csrf: text(200), plan: z.string().regex(/^[a-z0-9_]{1,40}$/), type: z.enum(VIDEO_TYPE_KEYS), rate: money }),
   login: z.strictObject({ email: text(254), password: text(200) }),

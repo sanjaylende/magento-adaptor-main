@@ -13,7 +13,7 @@ const { proxiedImageUrl } = require("./imageController");
 
 async function bootstrap(req, res) {
   const { store, installation } = tenant();
-  if (productService.list().length === 0) {
+  if (productService.list().length === 0 || productService.syncedAt() === null) {
     try {
       await productService.refreshProducts();
     } catch (err) {

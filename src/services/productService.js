@@ -47,4 +47,9 @@ const list = () => entry().products;
 const syncedAt = () => entry().syncedAt;
 const findProduct = (uniqueTag) => entry().products.find((p) => p.uniqueTag === uniqueTag);
 
-module.exports = { refreshProducts, list, syncedAt, findProduct };
+// The Magento extension says a store's catalog changed: the cached copy is marked stale and the next read refetches it. The products are KEPT,
+// because refreshProducts() compares the old list with the new one to carry a product's videos over when its uniqueTag changes (the tag follows
+// the variant that supplies the price, so a price change is exactly such a case); an empty "before" list would orphan those videos.
+const invalidate = (storeId) => { const e = byStore.get(storeId); if (e) e.syncedAt = null; };
+
+module.exports = { invalidate, refreshProducts, list, syncedAt, findProduct };

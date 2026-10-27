@@ -1,5 +1,6 @@
 // Lifestyle generation goes through the video-engine job/poll path (same as Hero Product / Image Transitions), no database needed.
 process.env.LOG_TO_FILE = "false";
+process.env.LOG_LEVEL = "error";
 process.env.OUTBOUND_ALLOWED_HOSTS = "127.0.0.1"; // the fake engine below
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -105,4 +106,75 @@ test("generateVideo lifestyle 'Update Overlay' (refresh) reuses the project and 
     assert.equal("theme" in b, false);
     assert.equal(b.prompt_is_final, false);
   } finally { e.server.close(); }
+});
+
+const json = (res, code, body) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
+
+test("runGeneration treats a lifestyle job like any other: polls it, marks it ready and counts it once (Update Overlay is not counted)", async () => {
+  // Replace the database-backed pieces before the service under test loads them.
+  const videoVersions = require("../src/repositories/VideoVersionRepository");
+  const generatedState = require("../src/services/generatedState");
+  const billing = require("../src/services/billingService");
+  const updates = [];
+  const slots = {};
+  videoVersions.updateVersionAndMirror = async (id, patch) => { updates.push({ id, ...patch }); return { id, ...patch }; };
+  generatedState.mergeVersion = (key, v) => { slots[key] = { ...slots[key], ...v }; };
+  generatedState.get = (key) => slots[key];
+  generatedState.set = (key, v) => { slots[key] = v; };
+  const counted = [];
+  billing.recordVideoCompleted = async (id, type) => { counted.push([id, type]); };
+
+  let polls = 0;
+  const e = await engine((req, res) => {
+    if (req.method === "POST") return json(res, 202, { job_id: "job-7" });
+    polls += 1;
+    return json(res, 200, polls < 2
+      ? { status: "processing", progress_pct: 40 }
+      : { status: "completed", video_url: "https://v/lifestyle.mp4", thumbnail_url: "https://v/t.jpg", project_id: "proj-7" });
+  });
+  const config = require("../src/config");
+  const saved = { ...config.flipick };
+  Object.assign(config.flipick, { videoEngineBaseUrl: e.base, videoEngineApiKey: "k" });
+  const { runGeneration } = require("../src/services/generationService");
+  try {
+    await runGeneration("t-1", product, { videoType: "lifestyle", prompt: "p", aspectRatio: "16:9" }, 41);
+    assert.equal(e.seen[0].body.video_type, "lifestyle");
+    assert.ok(updates.some((u) => u.jobId === "job-7"), "job id is stored on the version");
+    assert.ok(updates.some((u) => u.progressPct === 40), "progress is stored");
+    const ready = updates.find((u) => u.status === "ready");
+    assert.equal(ready.videoUrl, "https://v/lifestyle.mp4");
+    assert.equal(ready.projectId, "proj-7");
+    assert.deepEqual(counted, [[41, "lifestyle"]]);
+    assert.equal(slots["t-1::lifestyle"].status, "ready", "the in-memory slot shows the finished video");
+
+    polls = 5; // already completed
+    await runGeneration("t-1", product, { videoType: "lifestyle", mode: "refresh", aspectRatio: "16:9" }, 42, { projectId: "proj-7", skipBilling: true });
+    assert.equal(counted.length, 1, "Update Overlay is never counted");
+    assert.equal(e.seen.filter((s) => s.method === "POST")[1].body.project_id, "proj-7");
+  } finally {
+    Object.assign(config.flipick, saved);
+    e.server.close();
+  }
+});
+
+test("runGeneration marks a failed lifestyle job as an error and does not count it", async () => {
+  const videoVersions = require("../src/repositories/VideoVersionRepository");
+  const billing = require("../src/services/billingService");
+  const updates = [];
+  videoVersions.updateVersionAndMirror = async (id, patch) => { updates.push({ id, ...patch }); return { id, ...patch }; };
+  const counted = [];
+  billing.recordVideoCompleted = async (id) => { counted.push(id); };
+  const e = await engine((req, res) => (req.method === "POST" ? json(res, 202, { job_id: "job-8" }) : json(res, 200, { status: "failed", error: { message: "engine said no" } })));
+  const config = require("../src/config");
+  const saved = { ...config.flipick };
+  Object.assign(config.flipick, { videoEngineBaseUrl: e.base, videoEngineApiKey: "k" });
+  const { runGeneration } = require("../src/services/generationService");
+  try {
+    await runGeneration("t-2", product, { videoType: "lifestyle", prompt: "p", aspectRatio: "16:9" }, 51);
+    assert.equal(updates.find((u) => u.status === "error").error, "engine said no");
+    assert.deepEqual(counted, []);
+  } finally {
+    Object.assign(config.flipick, saved);
+    e.server.close();
+  }
 });

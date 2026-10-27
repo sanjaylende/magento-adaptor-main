@@ -135,14 +135,14 @@ describe("security hardening", () => {
   describe("M5 database roles", () => {
     it("the running service connects as a role without superuser, BYPASSRLS, CREATEDB or CREATEROLE", async () => {
       const { rows: [role] } = await db.query("SELECT current_user AS name, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = current_user");
-      assert.equal(role.name, "adapter_app");
+      assert.equal(role.name, decodeURIComponent(new URL(process.env.DATABASE_URL).username)); // the role of DATABASE_URL, never the owner
       assert.deepEqual([role.rolsuper, role.rolbypassrls, role.rolcreatedb, role.rolcreaterole], [false, false, false, false]);
     });
 
     it("row-level security is on for every tenant table, and without a tenant context the service sees no tenant rows", async () => {
       const { rows } = await db.asSystem(() => db.query(
         `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-          WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname IN ('eav_entity', 'store_subscriptions', 'payment_orders', 'invoices', 'credit_ledger', 'usage_events')`));
+          WHERE n.nspname = current_schema() AND c.relkind = 'r' AND c.relname IN ('eav_entity', 'store_subscriptions', 'payment_orders', 'invoices', 'credit_ledger', 'usage_events')`));
       assert.ok(rows.length >= 5, "the tenant tables exist");
       for (const t of rows) assert.equal(t.relrowsecurity, true, `${t.relname} has row-level security`);
       // no tenant and no system context: nothing is visible

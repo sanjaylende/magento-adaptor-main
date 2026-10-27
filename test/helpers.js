@@ -1,29 +1,26 @@
 // Shared test setup: a throwaway database, a fake Magento REST server, a running adapter, and a signed-request client.
 const http = require("http");
 const crypto = require("crypto");
-const { Client } = require("pg");
 
 const ADAPTER_PORT = 45123;
 const MAGENTO_PORT = 45124;
 const DB_NAME = "magento_adapter_test";
-const OWNER = "postgresql://adapter_owner:adapter_owner_local@127.0.0.1:5434";
+const { createScratchDatabase } = require("./scratchDatabase");
+let scratch = null; // { databaseUrl, adminUrl, schema, ... } of the throwaway database
 
 async function resetDatabase() {
   // Payments go to a pretend ICICI bank, never to the real sandbox (see test/fakeIcici.js). Installed here, before the app is loaded,
   // so the app's own settings (log level and so on) are not read too early.
   if (!module.exports.icici) module.exports.icici = require("./fakeIcici").install();
   if (!module.exports.ltx) module.exports.ltx = require("./fakeLtx").start();
-  const admin = new Client({ connectionString: `${OWNER}/postgres` });
-  await admin.connect();
-  await admin.query(`DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)`);
-  await admin.query(`CREATE DATABASE ${DB_NAME} OWNER adapter_owner`);
-  await admin.end();
+  scratch = await createScratchDatabase(DB_NAME);
+  module.exports.scratch = scratch;
 }
 
 function useTestEnvironment() {
   Object.assign(process.env, {
-    DATABASE_URL: `postgresql://adapter_app:adapter_app_local@127.0.0.1:5434/${DB_NAME}`,
-    DATABASE_ADMIN_URL: `${OWNER}/${DB_NAME}`,
+    // The scratch database is created by resetDatabase() (which runs first); the URLs are derived the same way here.
+    ...require("./scratchDatabase").envFor(DB_NAME),
     ADAPTER_SECRET_KEY: "11".repeat(32),
     PORT: String(ADAPTER_PORT),
     PUBLIC_BASE_URL: `http://127.0.0.1:${ADAPTER_PORT}`,
@@ -31,6 +28,7 @@ function useTestEnvironment() {
     ...require("./fakeLtx").ENV, // staff sign in against a pretend LTX (test/fakeLtx.js), never a real one
     INTERNAL_API_SECRET: crypto.randomBytes(16).toString("hex"), // a fresh made-up secret for each test run: the secret of /internal/* routes
     BILLING_GRACE_DAYS: "3",
+    BILLING_ORDER_CHECK_MIN_INTERVAL_MS: "0", // the order poll asks the bank every time in tests (test/iciciCancelRefund.e2e.test.js switches the throttle on for its own test)
     GST_RATE_BP: "1800",
     NODE_ENV: "test",
     // Tests must never reach a real video engine (it may be running on this machine and would spend real credits).
@@ -45,7 +43,10 @@ function startFakeMagento() {
     id, sku: `SKU-${id}`, name, status: 1, visibility: 4, price: 10 + id, type_id: "simple",
     extension_attributes: { website_ids: websiteIds },
     custom_attributes: [{ attribute_code: "product_type", value: "Fruits" }],
-    media_gallery_entries: [{ file: "/a.jpg", types: ["image"], disabled: false }],
+    // Apples (id 1) has seven photos, Pears (id 2) one: a real catalogue has several images per product.
+    media_gallery_entries: id === 1
+      ? Array.from({ length: 7 }, (_, i) => ({ id: i + 1, file: `/a/p/apples-${i + 1}.jpg`, position: i + 1, types: i === 0 ? ["image", "small_image", "thumbnail"] : [], disabled: false }))
+      : [{ file: "/a.jpg", types: ["image"], disabled: false }],
     updated_at: "2026-10-01 10:00:00",
   });
   const server = http.createServer((req, res) => {
