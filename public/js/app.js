@@ -2239,6 +2239,16 @@ function onStillDrop(e, targetId) {
 // Re-fetched fresh each time (not reused from enterStillsSelection's
 // original load) since an "Upload Image" click earlier in this same
 // session may have added new photos to the product since then.
+function imageKey(img) {
+  if (img && img.uploaded && typeof img.displayUrl === "string") {
+    try {
+      const payload = img.displayUrl.split("/up/")[1].split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+      return "upload:" + JSON.parse(window.atob(payload)).id;
+    } catch { /* fall through to the address */ }
+  }
+  return img.url;
+}
+
 async function onChangeImageClick(id) {
   const owner = modal;
   modal.changeImageTileId = id;
@@ -2251,8 +2261,8 @@ async function onChangeImageClick(id) {
     const body = await res.json();
     if (modal !== owner) return;
     if (!res.ok) throw new Error(body.error || "Couldn't load this product's photos");
-    const poolUrls = new Set(modal.pool.map((p) => p.url));
-    modal.otherRealImages = (body.images || []).filter((img) => !poolUrls.has(img.url)); // { url, displayUrl }
+    const inPool = new Set(modal.pool.map(imageKey));
+    modal.otherRealImages = (body.images || []).filter((img) => !inPool.has(imageKey(img))); // { url, displayUrl }
   } catch (err) {
     // A failed fetch must not look like a genuine "this product has no other photos" result -- show it as an error instead.
     if (modal !== owner) return;
