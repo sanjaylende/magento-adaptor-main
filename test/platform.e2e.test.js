@@ -136,6 +136,50 @@ describe("platform", () => {
     });
   });
 
+  describe("health check", () => {
+    it("answers 200 ok to anyone, without a session", async () => {
+      const res = await fetch(`http://127.0.0.1:${h.ADAPTER_PORT}/health`);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), "ok");
+      assert.match(res.headers.get("content-type"), /^text\/plain/);
+    });
+  });
+
+  describe("catalog change signal (extension to adapter)", () => {
+    const call = (body, creds = A) => h.signedClient({ installKey: creds.installKey, secret: creds.secret })("POST", "/api/v1/catalog-changed", body);
+    const synced = async (installation, websiteId) => ctx.runWithTenant(await ctxFor(installation, websiteId), async () => require("../src/services/productService").syncedAt());
+    const load = async (token) => h.api("GET", "/api/bootstrap", { token });
+
+    it("drops the cached catalog of the named websites only", async () => {
+      await load(sessionA1); await load(sessionA2);
+      assert.ok(await synced(A, 1) && await synced(A, 2), "both websites have a cached catalog");
+      const r = await call({ websiteIds: [1], reason: "product saved" });
+      assert.equal(r.status, 200);
+      assert.deepEqual({ ok: r.body.ok, invalidated: r.body.invalidated }, { ok: true, invalidated: 1 });
+      assert.equal(await synced(A, 1), null, "website 1 will be refetched");
+      assert.ok(await synced(A, 2), "website 2 is untouched");
+    });
+
+    it("with no website named, every website of the installation is dropped, and never another installation's", async () => {
+      await load(sessionA1); await load(sessionA2); await load(sessionB1);
+      const r = await call({});
+      assert.equal(r.status, 200);
+      assert.equal(r.body.invalidated, 2);
+      assert.equal(await synced(A, 1), null);
+      assert.equal(await synced(A, 2), null);
+      assert.ok(await synced(B, 1), "the other installation keeps its cache");
+    });
+
+    it("needs a valid signature and a known body: unsigned, wrong secret, unknown field and a bad website id are refused", async () => {
+      const url = `http://127.0.0.1:${h.ADAPTER_PORT}/api/v1/catalog-changed`;
+      assert.equal((await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
+      assert.equal((await call({}, { installKey: A.installKey, secret: "not-the-secret" })).status, 401);
+      assert.equal((await call({ websiteIds: [1], surprise: true })).status, 400);
+      assert.equal((await call({ websiteIds: ["1; DROP TABLE stores"] })).status, 400);
+      assert.equal((await call({ websiteIds: Array.from({ length: 101 }, (_, i) => i) })).status, 400);
+    });
+  });
+
   describe("stills picker: product photos and uploads", () => {
     const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 7)]);
     const upload = (token, body, { uniqueTag = "magento-1-novariant", type = "image/png", filename = "photo.png" } = {}) => fetch(

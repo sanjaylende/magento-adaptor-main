@@ -47,4 +47,7 @@ const list = () => entry().products;
 const syncedAt = () => entry().syncedAt;
 const findProduct = (uniqueTag) => entry().products.find((p) => p.uniqueTag === uniqueTag);
 
-module.exports = { refreshProducts, list, syncedAt, findProduct };
+// Drops a store's cached catalog (the Magento extension says it changed); the next refresh refetches it.
+const invalidate = (storeId) => byStore.delete(storeId);
+
+module.exports = { invalidate, refreshProducts, list, syncedAt, findProduct };

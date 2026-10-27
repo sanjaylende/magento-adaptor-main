@@ -33,6 +33,11 @@ const body = {
   }),
   session: z.strictObject({ launch: text(4096, 1) }),
   ping: z.strictObject({ magentoVersion: blankToUndefined(text(40)), extensionVersion: blankToUndefined(text(40)) }),
+  // The extension tells the adapter that catalog data changed (product saved or deleted, price or stock changed); no websites named = all of them.
+  catalogChanged: z.strictObject({
+    websiteIds: z.array(z.union([z.int().min(0).max(1000000), z.string().regex(/^[0-9]{1,9}$/)])).max(100).optional(),
+    reason: blankToUndefined(text(60)),
+  }),
   // Calls that carry no data: the extension may send {} or [] or nothing at all.
   emptyish: z.union([z.strictObject({}), z.array(z.never()).max(0)]).transform(() => ({})),
   tagAndType: z.strictObject({ uniqueTag: tag, videoType }),

@@ -5,6 +5,7 @@ const tenants = require("../services/tenantService");
 const { encrypt, randomToken } = require("../utils/crypto");
 const { query, asSystem } = require("../db/connection");
 const audit = require("../services/auditService");
+const productService = require("../services/productService");
 
 // Public (rate limited by IP). Proof of control is the Magento token itself, checked against the store.
 async function register(req, res) {
@@ -51,4 +52,15 @@ async function ping(req, res) {
   res.json({ ok: true, stores: (await tenants.listStores(req.installation.id)).map((s) => ({ websiteId: s.externalId, name: s.name })) });
 }
 
-module.exports = { register, syncStores, rotateSecret, uninstall, ping };
+// Signed. Magento has no webhooks of its own, so the extension (on a product save or delete, or a price or stock change) calls this: the
+// named websites' cached catalogs (all of the installation's, when none is named) are dropped and the next refresh refetches them.
+// Harmless to repeat, and a replayed signed request is already refused by the signature check, so no delivery ids are kept.
+async function catalogChanged(req, res) {
+  const named = new Set(((req.body && req.body.websiteIds) || []).map(String));
+  const stores = (await tenants.listStores(req.installation.id)).filter((s) => !named.size || named.has(String(s.externalId)));
+  stores.forEach((s) => productService.invalidate(s.id));
+  logger.info("[catalog-changed] catalog cache dropped", { installationId: req.installation.id, stores: stores.length, reason: req.body && req.body.reason });
+  res.json({ ok: true, invalidated: stores.length });
+}
+
+module.exports = { register, syncStores, rotateSecret, uninstall, ping, catalogChanged };

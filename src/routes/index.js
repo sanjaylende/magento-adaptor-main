@@ -33,6 +33,8 @@ const router = express.Router();
 const h = asyncHandler;
 
 // ---- Public: the UI shell, onboarding, sessions, payment pages, signed links, webhooks ----
+// For a load balancer or a hosting platform's health check: no database, no session, nothing to leak.
+router.get("/health", (req, res) => res.status(200).type("text/plain").send("ok"));
 router.get("/", h(page.index));
 // How to report a vulnerability (RFC 9116). SECURITY_CONTACT is an address or URL, e.g. mailto:security@example.com.
 router.get("/.well-known/security.txt", (req, res) => {
@@ -62,6 +64,7 @@ router.get("/internal/magento-token/:shop", perIp("internal-token", 60), require
 // ---- Extension, server to server (signed): no store needed ----
 const signedOnly = [tenantAuth({ requireStore: false }), perInstallation(300)];
 router.post("/api/v1/ping", ...signedOnly, validate({ body: S.body.ping }), h(installation.ping));
+router.post("/api/v1/catalog-changed", ...signedOnly, validate({ body: S.body.catalogChanged }), h(installation.catalogChanged));
 router.post("/api/v1/stores/sync", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.syncStores));
 router.post("/api/v1/rotate-secret", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.rotateSecret));
 router.post("/api/v1/uninstall", ...signedOnly, validate({ body: S.body.emptyish }), h(installation.uninstall));
