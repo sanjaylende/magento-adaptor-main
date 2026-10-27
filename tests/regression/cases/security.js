@@ -6,7 +6,7 @@ const path = require('path');
 module.exports = async function security({ stack, run }) {
   run.section('T10', 'Security regression (live journey against the running adapter)');
   const script = path.join(stack.repo, 'test-journeys', 'security-live.js');
-  const r = spawnSync(process.execPath, [script, stack.base], { cwd: stack.repo, encoding: 'utf8', timeout: 240000, env: { ...process.env, QA_DB: `${stack.platform}_regression`, MSYS_NO_PATHCONV: '1' } });
+  const r = spawnSync(process.execPath, [script, stack.base], { cwd: stack.repo, encoding: 'utf8', timeout: 240000, env: { ...process.env, QA_DB: `${stack.platform}_regression`, QA_DB_ADMIN_URL: stack.ownerUrl, QA_DB_SCHEMA: stack.schema, MSYS_NO_PATHCONV: '1' } });
   const lines = String(r.stdout || '').split(/\r?\n/);
   let n = 0;
   for (const l of lines) {

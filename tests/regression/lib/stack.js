@@ -4,7 +4,7 @@
 //   const stack = await start({ repo, platform, port });   // fresh database, adapter listening on `port`
 //   stack.base, stack.engine, stack.pay(txn, 'paid'), stack.db(sql), stack.stop()
 //
-// The database server is the adapter repo's own docker-compose "db" (Magento 127.0.0.1:5434, WooCommerce 127.0.0.1:5435); the database created
+// The database server is the adapter repo's own docker-compose "db" for WooCommerce (127.0.0.1:5435) and the shared PostgreSQL on 127.0.0.1:5432 for Magento; the database created
 // here is <platform>_regression and is dropped and recreated on every start. Requires: Docker (db running), Node 22+, ffmpeg/ffprobe.
 const path = require('path');
 const fs = require('fs');
@@ -23,12 +23,24 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   const pgPort = PG_PORT[platform];
   const dbName = `${platform}_regression`;
   const pg = require(path.join(repo, 'node_modules', 'pg'));
-  const OWNER = `postgresql://adapter_owner:adapter_owner_local@127.0.0.1:${pgPort}`;
-  const admin = new pg.Client({ connectionString: `${OWNER}/postgres` });
-  await admin.connect();
-  await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
-  await admin.query(`CREATE DATABASE ${dbName} OWNER adapter_owner`);
-  await admin.end();
+  // Magento: a scratch database on the shared PostgreSQL server (the adapter's schema and test-only roles, see test/scratchDatabase.js);
+  // any other platform: its own docker PostgreSQL as before.
+  let dbEnv, ownerUrl, schema = 'public';
+  if (platform === 'magento') {
+    const created = await require(path.join(repo, 'test', 'scratchDatabase.js')).createScratchDatabase(dbName);
+    dbEnv = { DATABASE_URL: created.databaseUrl, DATABASE_ADMIN_URL: created.adminUrl, DB_SCHEMA: created.schema, DB_SSL: 'disable' };
+    ownerUrl = created.adminUrl;
+    schema = created.schema;
+  } else {
+    const OWNER = `postgresql://adapter_owner:adapter_owner_local@127.0.0.1:${pgPort}`;
+    const admin = new pg.Client({ connectionString: `${OWNER}/postgres` });
+    await admin.connect();
+    await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
+    await admin.query(`CREATE DATABASE ${dbName} OWNER adapter_owner`);
+    await admin.end();
+    dbEnv = { DATABASE_URL: `postgresql://adapter_app:adapter_app_local@127.0.0.1:${pgPort}/${dbName}`, DATABASE_ADMIN_URL: `${OWNER}/${dbName}` };
+    ownerUrl = `${OWNER}/${dbName}`;
+  }
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), `regression-${platform}-`));
   const children = [];
@@ -63,7 +75,7 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   `);
   spawnNode([launcher], {
     PORT: String(port), PUBLIC_BASE_URL: `http://127.0.0.1:${port}`, NODE_ENV: 'development', LOG_LEVEL: 'info',
-    DATABASE_URL: `postgresql://adapter_app:adapter_app_local@127.0.0.1:${pgPort}/${dbName}`, DATABASE_ADMIN_URL: `${OWNER}/${dbName}`,
+    ...dbEnv,
     ADAPTER_SECRET_KEY: '33'.repeat(32), // staff sign in through the pretend LTX (test/fakeLtx.js), so no staff password is configured here
     FLIPICK_VIDEO_ENGINE_BASE_URL: engine, FLIPICK_VIDEO_ENGINE_API_KEY: engineKey, FLIPICK_SPONSORED_ADS_BASE_URL: engine, FLIPICK_VVP_API_KEY: 'test',
     FLIPICK_TENANT_ID: 'regression', RETAILER_NAME: 'Regression Retailer', BILLING_GRACE_DAYS: '3',
@@ -75,10 +87,12 @@ async function start({ repo, platform, port = 4290, engineKey = 'test-key', rend
   const helpers = (() => { const cwd = process.cwd(); process.chdir(os.tmpdir()); try { return require(path.join(repo, 'test', 'helpers.js')); } finally { process.chdir(cwd); } })();
   const { startFakeStore } = require('./fake-store');
   const fakeStore = await startFakeStore({ platform, port: port + 2000, dir: path.join(work, 'store') });
-  const ownerPool = new pg.Pool({ connectionString: `${OWNER}/${dbName}`, max: 2 });
+  const ownerPool = new pg.Pool({ connectionString: ownerUrl, options: `-c search_path=${schema}`, max: 2 });
+  // The owner role is least-privilege (no BYPASSRLS) and row-level security is forced: this checking session asks to see every tenant, like the staff console.
+  ownerPool.on('connect', (c) => c.query("SELECT set_config('app.bypass', 'on', false)").catch(() => {}));
 
   return {
-    base, engine, platform, repo, work, helpers, port, store: fakeStore, staff: { email: 'staff@test.local', password: 'staff-password-1' }, // the pretend LTX's superadmin (made up, test only)
+    base, engine, platform, repo, work, helpers, port, ownerUrl, schema, store: fakeStore, staff: { email: 'staff@test.local', password: 'staff-password-1' }, // the pretend LTX's superadmin (made up, test only)
     db: async (sql, params) => (await ownerPool.query(sql, params)).rows,
     pay: async (txn, result = 'paid') => { const r = await fetch(`http://127.0.0.1:${port + 80}/pay?txn=${encodeURIComponent(txn)}&result=${result}`); return (await r.text()).replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); },
     engineRequests: async () => (await fetch(`${engine}/_requests`)).json(),
