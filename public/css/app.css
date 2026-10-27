@@ -208,8 +208,8 @@ s { color: #6b6a64; margin-left: 4px; }
 .plan-card .plan-price small { font-size: 11px; font-weight: 400; color: #6b6a64; }
 .plan-card .plan-price-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
 .plan-card .plan-price-row .plan-price { margin: 0; }
-.plan-card .plan-price-strike { font-size: 13px; color: #a9a79d; text-decoration: line-through; }
-.plan-card .plan-save-badge { font-size: 10.5px; font-weight: 600; color: #1a7f4b; background: #e6f4ec; border-radius: 10px; padding: 2px 8px; }
+.plan-card .plan-price-strike { font-size: 13px; color: #6b6a64; text-decoration: line-through; }
+.plan-card .plan-save-badge { font-size: 10.5px; font-weight: 600; color: #14683c; background: #e6f4ec; border-radius: 10px; padding: 2px 8px; }
 .plan-card > .plan-price, .plan-card > .plan-price-row { height: 56px; overflow: hidden; }
 .plan-card .plan-meta {
   font-size: 12px; line-height: 16px; color: #6b6a64; margin-bottom: 10px;
@@ -343,7 +343,7 @@ body.embed { padding-top: 12px; }
 .history-table th, .history-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #ece9df; vertical-align: top; }
 .history-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .pay-status { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #f1efe8; font-size: 11.5px; }
-.pay-status.paid { background: #e6f4ec; color: #1a7f4b; } .pay-status.failed, .pay-status.canceled { background: #fbe9e9; color: #b00020; }
+.pay-status.paid { background: #e6f4ec; color: #14683c; } .pay-status.failed, .pay-status.canceled { background: #fbe9e9; color: #b00020; }
 .pay-status.pending, .pay-status.created { background: #fdf0d5; color: #8a5a00; }
 .pay-status.refunded, .pay-status.partially_refunded { background: #ece9f8; color: #534ab7; }
 
@@ -371,10 +371,11 @@ body.embed { padding-top: 12px; }
   .selection-layout { align-items: stretch; }
   .main-column, .detail-panel { width: 100%; min-width: 0; box-sizing: border-box; }
 }
+/* a long search word makes a long filter chip: it wraps inside the screen at every width, not only on a phone */
+.filter-chip { max-width: 100%; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   /* the product table is wider than a phone: it scrolls sideways inside its own box instead of widening the page */
   .main-column table { display: block; overflow-x: auto; max-width: 100%; }
-  .filter-chip { max-width: 100%; overflow-wrap: anywhere; }
 }
 @media (max-width: 640px) {
   /* the title and the usage badge / View Plans / Refresh buttons stack and wrap instead of running off the screen */

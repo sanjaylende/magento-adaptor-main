@@ -43,7 +43,10 @@ function startFakeMagento() {
     id, sku: `SKU-${id}`, name, status: 1, visibility: 4, price: 10 + id, type_id: "simple",
     extension_attributes: { website_ids: websiteIds },
     custom_attributes: [{ attribute_code: "product_type", value: "Fruits" }],
-    media_gallery_entries: [{ file: "/a.jpg", types: ["image"], disabled: false }],
+    // Apples (id 1) has seven photos, Pears (id 2) one: a real catalogue has several images per product.
+    media_gallery_entries: id === 1
+      ? Array.from({ length: 7 }, (_, i) => ({ id: i + 1, file: `/a/p/apples-${i + 1}.jpg`, position: i + 1, types: i === 0 ? ["image", "small_image", "thumbnail"] : [], disabled: false }))
+      : [{ file: "/a.jpg", types: ["image"], disabled: false }],
     updated_at: "2026-10-01 10:00:00",
   });
   const server = http.createServer((req, res) => {

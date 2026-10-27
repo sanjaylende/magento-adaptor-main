@@ -246,6 +246,24 @@ describe("platform", () => {
       assert.equal(seen, 0, "row-level security hides it from another store");
     });
 
+    it("a product with seven store photos lists all seven in the store's order, each with a signed link; a product with one lists one", async () => {
+      await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const r = await h.api("GET", "/api/product-images/magento-1-novariant", { token: sessionA1 });
+      assert.equal(r.status, 200);
+      const store = r.body.images.filter((i) => !i.uploaded);
+      assert.equal(store.length, 7);
+      assert.deepEqual(store.map((i) => i.url.split("/").pop()), Array.from({ length: 7 }, (_, i) => `apples-${i + 1}.jpg`));
+      assert.ok(store.every((i) => /^\/img\/[A-Za-z0-9_.-]+$/.test(i.displayUrl) && /^https?:\/\//.test(i.url) && i.source === "real"));
+      assert.equal(new Set(store.map((i) => i.displayUrl)).size, 7, "every picture has its own link");
+      const boot = await h.api("GET", "/api/bootstrap", { token: sessionA1 });
+      const apples = boot.body.products.find((p) => p.uniqueTag === "magento-1-novariant");
+      assert.equal(apples.images.length, 7);
+      assert.equal(apples.image, apples.images[0], "the first photo is the product picture");
+      const boot2 = await h.api("GET", "/api/bootstrap", { token: sessionA2 });
+      const pears = boot2.body.products.find((p) => p.name === "Pears");
+      assert.equal(pears.images.length, 1);
+    });
+
     it("a photo uploaded for a product is offered again for that product only, newest first, for 8 days", async () => {
       const boot = await h.api("GET", "/api/bootstrap", { token: sessionA1 });
       const other = boot.body.products.find((p) => p.uniqueTag !== "magento-1-novariant");

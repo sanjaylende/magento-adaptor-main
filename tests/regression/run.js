@@ -1,5 +1,5 @@
 // The automated regression suite of ONE adapter repo.   npm run regression
-//   node tests/regression/run.js [case,case,...]      cases: subscriptions, video, ui, security, sqli, perf, soak   (default: all but soak)
+//   node tests/regression/run.js [case,case,...]      cases: subscriptions, video, ui, images, security, sqli, perf, soak   (default: all but soak)
 // It starts a throwaway database, a mock video engine, a fake store and the adapter itself (development mode, pretend bank), runs the cases, writes
 // tests/regression/reports/<platform>-<cases>.{md,json} and exits 1 when any check failed. Nothing here reaches a real service.
 // The cases run in up to three groups, each on its own freshly started adapter: the functional cases (real rate limits, so the security journey can
@@ -14,7 +14,7 @@ const { connectStore, waitStatus, sleep } = require('./lib/client');
 const repo = path.resolve(process.env.REPO || path.join(__dirname, '..', '..'));
 const platform = process.env.PLATFORM || (/woo/i.test(require(path.join(repo, 'package.json')).name) ? 'woo' : 'magento');
 const arg = process.argv.slice(2).find((a) => !a.startsWith('--'));
-const only = (arg || 'subscriptions,video,ui,security,sqli,perf').split(',');
+const only = (arg || 'subscriptions,video,ui,images,security,sqli,perf').split(',');
 const reportDir = path.resolve(process.env.REPORT_DIR || path.join(__dirname, 'reports'));
 const port = Number(process.env.REGRESSION_PORT || (platform === 'magento' ? 4290 : 4390));
 const groups = [

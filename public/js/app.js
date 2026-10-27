@@ -1428,6 +1428,8 @@ async function openUpdateOverlayModal(tag, videoType) {
 }
 
 async function loadAttributeOptions() {
+  const owner = modal;
+  if (!owner) return;
   try {
     // apiUrl(), not a raw path -- this app is multi-shop, and a raw
     // path silently resolves against whichever shop this server's
@@ -1435,13 +1437,15 @@ async function loadAttributeOptions() {
     // (a 404, not a thrown error) for every other shop -- confirmed
     // live against the deployed stage instance, whose fallback shop
     // doesn't match san2-test-store.
-    const res = await fetch(apiUrl("/api/product-attributes/" + encodeURIComponent(modal.tag)));
+    const res = await fetch(apiUrl("/api/product-attributes/" + encodeURIComponent(owner.tag)));
     const body = await res.json();
-    modal.attributeOptions = body.options || [];
+    if (modal !== owner) return; // the dialog was closed (or another one opened) while this was loading
+    owner.attributeOptions = body.options || [];
   } catch {
-    modal.attributeOptions = [];
+    if (modal !== owner) return;
+    owner.attributeOptions = [];
   }
-  modal.loadingAttributeOptions = false;
+  owner.loadingAttributeOptions = false;
   renderModalPreservingPrompt();
 }
 
@@ -1510,6 +1514,8 @@ async function onVideoTypeToggle(type) {
 }
 
 async function loadPromptDefaultFor(type) {
+  const owner = modal;
+  if (!owner) return;
   modal.loadingDefaultByType[type] = true;
   modal.promptErrorByType[type] = null;
   renderModal();
@@ -1519,9 +1525,11 @@ async function loadPromptDefaultFor(type) {
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: type }),
     });
     const body = await res.json().catch(() => ({}));
+    if (modal !== owner) return; // closed (or replaced) while loading
     if (!res.ok) throw new Error(body.error || "Couldn't load the default prompt (" + res.status + ")");
     modal.promptByType[type] = body.prompt || "";
   } catch (err) {
+    if (modal !== owner) return;
     modal.promptByType[type] = modal.promptByType[type] || "";
     modal.promptErrorByType[type] = err.message;
   }
@@ -1545,6 +1553,8 @@ function onPromptByTypeChange(type, value) {
 // analog to Template Groups' is_default bundle) -- the user always picks
 // explicitly, starting from "(none)".
 async function loadModalOverlayFamilies() {
+  const owner = modal;
+  if (!owner) return;
   modal.loadingOverlayFamilies = true;
   renderModalPreservingPrompt();
   try {
@@ -1559,8 +1569,10 @@ async function loadModalOverlayFamilies() {
     // even though the family really is attached.
     const res = await fetch(apiUrl("/api/overlay-families?aspectRatio=" + encodeURIComponent(modal.aspectRatio)));
     const body = await res.json();
+    if (modal !== owner) return; // closed (or replaced) while loading
     modal.overlayFamilies = body.families || [];
   } catch {
+    if (modal !== owner) return;
     modal.overlayFamilies = [];
   }
   // Keep the current selection if it's still valid for this size;
@@ -1617,6 +1629,8 @@ function onAspectRatioChange(value) {
 }
 
 async function refillPromptDefault() {
+  const owner = modal;
+  if (!owner) return;
   modal.loadingDefault = true;
   modal.promptError = null;
   renderModal();
@@ -1631,9 +1645,11 @@ async function refillPromptDefault() {
       body: JSON.stringify({ uniqueTag: modal.tag, videoType: modal.videoType }),
     });
     const body = await res.json().catch(() => ({}));
+    if (modal !== owner) return; // closed (or replaced) while loading
     if (!res.ok) throw new Error(body.error || "Couldn't load the default prompt (" + res.status + ")");
     modal.prompt = body.prompt || "";
   } catch (err) {
+    if (modal !== owner) return;
     // Surfaced instead of swallowed -- e.g. the stale-uniqueTag 404
     // ("Product not found — try Refresh") used to leave the Prompt
     // field silently empty, which disabled Generate with no indication
